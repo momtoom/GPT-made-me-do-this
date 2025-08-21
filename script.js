@@ -61,38 +61,67 @@ async function buildParticles() {
   const maxLineW = measureMaxLineWidth();
   const baseX = (W / 2) - (maxLineW / 2);  // 중앙에서 왼쪽 정렬 anchoring
 
-  // 오프스크린 캔버스로 텍스트 그리기 & 픽셀 샘플링
-  const off = new OffscreenCanvas(W, H);
+async function buildParticles() {
+  particles.length = 0;
+  ctx.clearRect(0,0,W,H);
+
+  // 글꼴 셋업
+  ctx.font = FONT;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+
+  // 중앙 기준 좌측 정렬 앵커
+  const totalH = LINES.length * LINE_H;
+  const startY = (H / 2) - (totalH / 2);
+  const maxLineW = measureMaxLineWidth();
+  const baseX = (W / 2) - (maxLineW / 2);
+
+  // 🔧 투명 오프스크린 캔버스 만들기 (배경 채우지 않음!)
+  const off = ('OffscreenCanvas' in window)
+    ? new OffscreenCanvas(W, H)
+    : Object.assign(document.createElement('canvas'), { width: W, height: H });
   const octx = off.getContext('2d', { willReadFrequently: true });
-  octx.fillStyle = '#000';
-  octx.fillRect(0,0,W,H);
-  octx.fillStyle = '#fff';
+
+  // 투명 유지
+  octx.clearRect(0, 0, W, H);
+  octx.font = FONT;
   octx.textBaseline = 'top';
   octx.textAlign = 'left';
-  octx.font = FONT;
+  octx.fillStyle = '#fff';
 
+  // 글자 찍기
   LINES.forEach((text, i) => {
     const y = startY + i * LINE_H;
     octx.fillText(text, baseX, y);
   });
 
-  const { data } = octx.getImageData(0, 0, W, H);
+  // 텍스트 영역만 샘플링(속도↑)
+  const minX = Math.max(0, Math.floor(baseX));
+  const maxX = Math.min(W, Math.ceil(baseX + maxLineW));
+  const minY = Math.max(0, Math.floor(startY));
+  const maxY = Math.min(H, Math.ceil(startY + LINES.length * LINE_H));
 
-  // 샘플링
-  for (let y = 0; y < H; y += STEP) {
-    for (let x = 0; x < W; x += STEP) {
-      const a = data[(y * W + x) * 4 + 3]; // alpha
-      if (a > 128) {
+  const img = octx.getImageData(minX, minY, maxX - minX, maxY - minY);
+  const data = img.data;
+  const iw = img.width;
+
+  for (let y = 0; y < img.height; y += STEP) {
+    for (let x = 0; x < img.width; x += STEP) {
+      const a = data[(y * iw + x) * 4 + 3]; // 알파
+      if (a > 10) { // 0보다 조금만 커도 OK
+        const gx = (minX + x);
+        const gy = (minY + y);
         particles.push({
-          x: x + (Math.random()-0.5)*8, 
-          y: y + (Math.random()-0.5)*8,
-          ox: x, oy: y,
+          x: gx + (Math.random() - 0.5) * 6,
+          y: gy + (Math.random() - 0.5) * 6,
+          ox: gx, oy: gy,
           vx: 0, vy: 0
         });
       }
     }
   }
 }
+
 
 async function ready() {
   // 폰트 로드가 끝난 뒤에 샘플링해야 모양이 흐트러지지 않음
