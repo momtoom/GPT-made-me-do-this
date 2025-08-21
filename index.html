@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Vibe Murmuration 3D — hover reveal</title>
+  <title>Vibe Murmuration 3D — hover letter reveal (single file)</title>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@500&display=swap" rel="stylesheet">
   <style>
@@ -16,7 +16,7 @@
 <body>
   <div id="app"></div>
   <div id="debug"></div>
-  <div id="hint">SPACE: 토글(전체 결집/해산) · 마우스: 글자 위에서만 국소 결집</div>
+  <div id="hint">SPACE: 전체 결집/해산 · 마우스: 글자 위에서 윤곽 드러남</div>
 
   <script type="module">
     // ---------- logger & dynamic import
@@ -53,7 +53,7 @@
       }
       const { THREE, OrbitControls } = mod;
 
-      // ---------- Parameters (성능+가독)
+      // ---------- Parameters
       const TEXT_LINES = [
         'SPENT HOURS BACKFLOW',
         'SLOWLY RISING ROUND MY SKIN',
@@ -62,13 +62,13 @@
       const FONT_FAMILY = "'Host Grotesk', system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 
       // 밀도 & 예산
-      const GRID_STEP = 2;
+      const GRID_STEP = 2;               // 텍스트 샘플 해상도 (1은 과도)
       const DOT_SIZE  = 0.014;
-      const SWARM_DENSITY = 300;         // 화면면적/300 ≈ 파티클 수 (FHD ~6.9k)
+      const SWARM_DENSITY = 300;         // 화면면적/300 ≈ 파티클 수
       const MAX_PARTICLES  = 12000;      // 절대 상한
 
       // 텍스트 포인트 부분 샘플(윤곽만)
-      const TEXT_MAP_RATIO = 0.35;       // 전체 중 35%만 사용
+      const TEXT_MAP_RATIO = 0.35;
 
       // 동역학
       const CURL_SCALE = 0.28;
@@ -76,24 +76,25 @@
       const MAX_SPD    = 1.2;
       const MOUSE_PULL = 0.55;
 
-      // 결집(텍스트 리빌)
+      // 텍스트 결집
       const REVEAL_SPRING = 6.8;
       const UNCLAIM_DIST  = 0.012;
 
-      // 분리/해시 (계산량↓)
+      // 분리/해시
       const SEP_RADIUS = 0.05;
       const SEP_FORCE  = 0.6;
       const HASH_CELL  = 0.08;
-      const FLOCK_EVERY_N = 2;           // 분리 연산 격프레임
+      const FLOCK_EVERY_N = 2;           // 격프레임 분리
 
       // 깊이/연출
       const Z_RANGE = 0.7;
       const SCENE_SLOW_SPIN = 0.04;
 
-      // Hover reveal
-      const REVEAL_RADIUS = 0.28;        // 마우스 근처(월드 단위)에서만 텍스트로 결집
-      const CLAIM_BATCH   = 160;         // 프레임당 타깃 부여 개수
-      const RELEASE_DELAY = 450;         // 마우스가 글자 밖으로 나간 후 해산 지연(ms)
+      // Hover reveal (국소 글자 드로잉)
+      const REVEAL_RADIUS = 0.26;        // 텍스트 타깃 선택 반경
+      const CLAIM_BATCH   = 600;         // 프레임당 매칭량
+      const RELEASE_DELAY = 450;         // 글자 밖에서 해산 지연(ms)
+      const PARTICLE_CLAIM_RADIUS = 0.24;// 마우스 주변 파티클 후보 반경
 
       // ---------- Scene
       const el = document.getElementById('app');
@@ -111,18 +112,18 @@
       controls.enableDamping = true; controls.enableZoom = false; controls.enablePan = false;
       scene.fog = new THREE.FogExp2(0x0b0d10, 1.1);
 
-      // 화면 프러스텀 경계(z=0 평면)
+      // 화면 프러스텀 경계(z=0)
       const bounds = { minX:0, maxX:0, minY:0, maxY:0 };
       function computeBounds(){
         const halfY = Math.tan(THREE.MathUtils.degToRad(camera.fov)*0.5) * camera.position.z;
         const halfX = halfY * camera.aspect;
-        const padX = 0.04, padY = 0.04; // 살짝 여유
+        const padX = 0.04, padY = 0.04;
         bounds.minX = -halfX - padX; bounds.maxX = halfX + padX;
         bounds.minY = -halfY - padY; bounds.maxY = halfY + padY;
       }
       computeBounds();
 
-      // ---------- 텍스트 → 포인트(+ world rect)
+      // ---------- 텍스트 → 포인트(+ rect)
       function makeTextPoints(){
         const W = Math.max(1280, innerWidth);
         const H = Math.max(720, innerHeight);
@@ -170,22 +171,20 @@
           x: THREE.MathUtils.lerp(bounds.minX, bounds.maxX, minX/W),
           y: THREE.MathUtils.lerp(bounds.minY, bounds.maxY, 1 - minY/H),
           w: THREE.MathUtils.lerp(0, bounds.maxX-bounds.minX, (maxX-minX)/W),
-          h: -THREE.MathUtils.lerp(0, bounds.maxY-bounds.minY, (maxY-minY)/H) // 위가 +
+          h: -THREE.MathUtils.lerp(0, bounds.maxY-bounds.minY, (maxY-minY)/H)
         };
         return { pts, rect };
       }
 
-      // 최초 생성
       let { pts: textPoints, rect: textRect } = makeTextPoints();
 
-      // 텍스트 부분 샘플 + 텍스트용 공간 해시
+      // 텍스트 샘플 + 텍스트용 해시
       let textForMap = [];
       const textHash = new Map();
-      function tkey(ix,iy){ return (ix<<16)^iy; }
       const T_HASH = HASH_CELL * 0.8;
+      const tkey = (ix,iy)=> (ix<<16)^iy;
       const t_ix = (x)=> Math.floor((x - bounds.minX)/T_HASH);
       const t_iy = (y)=> Math.floor((y - bounds.minY)/T_HASH);
-
       function rebuildTextMappingAndHash(){
         textForMap = textPoints.filter(()=> Math.random() < TEXT_MAP_RATIO);
         textHash.clear();
@@ -245,7 +244,7 @@
       }
 
       rebuildTextMappingAndHash();
-      // 원하는 수 재산정(텍스트 수 고려) 및 재할당
+      // 최종 파티클 수 재산정
       const wantByArea = Math.floor((innerWidth*innerHeight)/SWARM_DENSITY);
       const minForText = Math.ceil(textForMap.length*1.1);
       particleCount = Math.min(MAX_PARTICLES, Math.max(wantByArea, minForText));
@@ -257,10 +256,9 @@
       }
       initParticles();
 
-      // ---------- 전역 결집 토글(스페이스)
+      // ---------- 전역 결집(스페이스)
       let assembling = false;
       let assembleInstant = false;
-      // 매핑: 텍스트 포인트 ↔ 파티클 인덱스 균등 샘플
       function globalMappedPairs(){
         const mapCount = Math.min(textForMap.length, particleCount);
         const particleIdx = Array.from({length: particleCount}, (_,i)=>i);
@@ -285,12 +283,11 @@
         geom.attributes.target.needsUpdate = true;
         assembling = false;
       }
-      // 초기 살짝 보여주고 해산
       setTimeout(()=> assembleText(false), 900);
       setTimeout(()=> releaseText(), 900 + 2600);
       addEventListener('keydown', (e)=>{ if (e.code==='Space'){ if (assembling) releaseText(); else assembleText(false); } });
 
-      // ---------- 마우스 & hover reveal
+      // ---------- 마우스 & hover 상태
       const mouseNdc = new THREE.Vector2(0,0);
       const mouseWorld = new THREE.Vector3();
       const plane = new THREE.Plane(new THREE.Vector3(0,0,1), 0); // z=0
@@ -315,53 +312,83 @@
                 y < textRect.y - m && y > textRect.y + textRect.h - m);
       }
 
-      // 텍스트 근처 타깃을 빠르게 찾기(텍스트 해시 사용)
+      // 텍스트 해시에서 마우스 주변 타깃 후보 뽑기
       function claimTargetsAround(mx,my,count=CLAIM_BATCH){
         const cx = t_ix(mx), cy = t_iy(my);
         const cand = [];
-        for (let oy=-1; oy<=1; oy++){
-          for (let ox=-1; ox<=1; ox++){
-            const arr = textHash.get(tkey(cx+ox, cy+oy)); if (!arr) continue;
-            for (let k=0;k<arr.length;k++){
-              const i = arr[k];
-              const tp = textForMap[i];
-              const dx = tp.x - mx, dy = tp.y - my;
-              const d2 = dx*dx + dy*dy;
-              if (d2 < REVEAL_RADIUS*REVEAL_RADIUS) cand.push({i, d2});
-            }
+        for (let oy=-1; oy<=1; oy++)
+        for (let ox=-1; ox<=1; ox++){
+          const arr = textHash.get(tkey(cx+ox, cy+oy)); if (!arr) continue;
+          for (let k=0;k<arr.length;k++){
+            const i = arr[k];
+            const tp = textForMap[i];
+            const dx = tp.x - mx, dy = tp.y - my;
+            const d2 = dx*dx + dy*dy;
+            if (d2 < REVEAL_RADIUS*REVEAL_RADIUS) cand.push({i, d2});
           }
         }
         cand.sort((a,b)=>a.d2-b.d2);
-        return cand.slice(0, count).map(o=>o.i);
+        if (cand.length>count) cand.length = count;
+        return cand.map(o=>o.i);
       }
 
-      // 빈 파티클(타깃 미할당) 중 일부를 뽑아 타깃 부여
-      function assignTargetsToFreeParticles(tpIndices){
-        const tar = geom.attributes.target.array;
-        const total = tar.length/3;
-        let assigned = 0;
-        for (let n=0; n<tpIndices.length; n++){
-          // 랜덤 파티클부터 탐색(최대 8회 시도)
-          for (let tryN=0; tryN<8; tryN++){
-            const idx = (Math.random()*total)|0;
-            if (tar[idx*3]===999){
-              const tp = textForMap[tpIndices[n]];
-              tar[idx*3+0]=tp.x; tar[idx*3+1]=tp.y; tar[idx*3+2]=0;
-              assigned++; break;
-            }
-          }
-          if (assigned >= CLAIM_BATCH) break;
-        }
-        if (assigned>0) geom.attributes.target.needsUpdate = true;
-      }
-
-      // ---------- 공간 해시(파티클)
+      // ---------- 파티클 해시(월드)
       const hash = new Map();
       const SEP_R2 = SEP_RADIUS*SEP_RADIUS;
-      function key(ix,iy,iz){ return (ix<<20) ^ (iy<<10) ^ iz; }
+      const pkey = (ix,iy,iz)=> (ix<<20) ^ (iy<<10) ^ iz;
       const ix = (x)=> Math.floor((x - bounds.minX)/HASH_CELL);
       const iy = (y)=> Math.floor((y - bounds.minY)/HASH_CELL);
       const iz = (z)=> Math.floor((z + Z_RANGE)/HASH_CELL);
+
+      // 마우스 주변 파티클 후보 모으기
+      function nearbyParticles(mx, my, radius, maxCount=1200){
+        const r2 = radius*radius;
+        const cx = ix(mx), cy = iy(my), cz = iz(0);
+        const out = [];
+        for (let oz=-1; oz<=1; oz++)
+        for (let oy=-1; oy<=1; oy++)
+        for (let ox=-1; ox<=1; ox++){
+          const arr = hash.get(pkey(cx+ox, cy+oy, cz+oz)); if (!arr) continue;
+          for (let k=0;k<arr.length;k++){
+            const i = arr[k]; const j = i*3;
+            const dx = positions[j]-mx, dy = positions[j+1]-my;
+            const d2 = dx*dx + dy*dy;
+            if (d2 < r2) out.push({i, d2});
+          }
+        }
+        out.sort((a,b)=>a.d2-b.d2);
+        if (out.length>maxCount) out.length = maxCount;
+        return out.map(o=>o.i);
+      }
+
+      // 텍스트 타깃 ↔ 근처 파티클 매칭(그리디)
+      function matchTargetsToNearbyParticles(tpIndices, mx, my){
+        const tar = geom.attributes.target.array;
+        const freeCandidates = nearbyParticles(mx, my, PARTICLE_CLAIM_RADIUS, CLAIM_BATCH*2);
+        const pool = [];
+        for (let n=0; n<freeCandidates.length && pool.length < CLAIM_BATCH; n++){
+          const pi = freeCandidates[n];
+          if (tar[pi*3] === 999) pool.push(pi);
+        }
+        if (!pool.length) return;
+
+        for (let t=0; t<tpIndices.length && pool.length; t++){
+          const tp = textForMap[tpIndices[t]];
+          let bestIdx=-1, bestD2=1e9, bestK=-1;
+          for (let k=0;k<pool.length;k++){
+            const pi = pool[k], j=pi*3;
+            const dx = positions[j]-tp.x, dy = positions[j+1]-tp.y;
+            const d2 = dx*dx + dy*dy;
+            if (d2 < bestD2){ bestD2=d2; bestIdx=pi; bestK=k; }
+          }
+          if (bestIdx>=0){
+            const j = bestIdx*3;
+            tar[j+0]=tp.x; tar[j+1]=tp.y; tar[j+2]=0;
+            pool[bestK] = pool[pool.length-1]; pool.pop(); // 사용한 파티클 제거
+          }
+        }
+        geom.attributes.target.needsUpdate = true;
+      }
 
       // ---------- 루프
       let lastT = performance.now()*0.001;
@@ -379,26 +406,26 @@
         const vel = geom.attributes.velocity.array;
         const tar = geom.attributes.target.array;
 
-        // Hover reveal 로직
+        // 파티클 해시 리빌드 (← hover 매칭 전에!)
+        hash.clear();
+        for (let i=0;i<pos.length;i+=3){
+          const k = pkey(ix(pos[i]), iy(pos[i+1]), iz(pos[i+2]));
+          if (!hash.has(k)) hash.set(k, []);
+          hash.get(k).push(i/3);
+        }
+
+        // Hover reveal
         if (mouseActive && mouseOverText()){
           lastOnTextMs = performance.now();
           const nearIdx = claimTargetsAround(mouseWorld.x, mouseWorld.y, CLAIM_BATCH);
-          if (nearIdx.length) assignTargetsToFreeParticles(nearIdx);
+          if (nearIdx.length) matchTargetsToNearbyParticles(nearIdx, mouseWorld.x, mouseWorld.y);
         } else {
-          // 글자 밖으로 나간지 RELEASE_DELAY 지나면 자동 해산
           if (performance.now() - lastOnTextMs > RELEASE_DELAY && !assembling){
             releaseText();
           }
         }
 
-        // 파티클 해시 리빌드
-        hash.clear();
-        for (let i=0;i<pos.length;i+=3){
-          const k = key(ix(pos[i]), iy(pos[i+1]), iz(pos[i+2]));
-          if (!hash.has(k)) hash.set(k, []);
-          hash.get(k).push(i/3);
-        }
-
+        // Dynamics
         for (let i=0;i<pos.length;i+=3){
           let x=pos[i], y=pos[i+1], z=pos[i+2];
           let vx=vel[i], vy=vel[i+1], vz=vel[i+2];
@@ -435,7 +462,7 @@
 
             const dx=tx-x, dy=ty-y, dz=tz-z;
             if (dx*dx + dy*dy + dz*dz < UNCLAIM_DIST*UNCLAIM_DIST){
-              vx*=0.7; vy*=0.7; vz*=0.7; // 도착 흔들림 억제
+              vx*=0.7; vy*=0.7; vz*=0.7;
             }
           }
 
@@ -446,7 +473,7 @@
             for (let oz=-1; oz<=1; oz++)
             for (let oy=-1; oy<=1; oy++)
             for (let ox=-1; ox<=1; ox++){
-              const arr = hash.get(key(cx+ox, cy+oy, cz+oz)); if (!arr) continue;
+              const arr = hash.get(pkey(cx+ox, cy+oy, cz+oz)); if (!arr) continue;
               for (let k=0;k<arr.length;k++){
                 const j = arr[k]*3; if (j===i) continue;
                 const dx = x - pos[j], dy = y - pos[j+1], dz = z - pos[j+2];
@@ -462,12 +489,12 @@
                         vz += (sz/cnt) * SEP_FORCE * dt; }
           }
 
-          // 감쇠/속도제한/이동
+          // 감쇠/속도/이동
           vx*=DAMP; vy*=DAMP; vz*=DAMP;
           const sp=Math.hypot(vx,vy,vz); if (sp>MAX_SPD){ const s=MAX_SPD/sp; vx*=s; vy*=s; vz*=s; }
           x += vx*dt; y += vy*dt; z += vz*dt;
 
-          // 경계
+          // 경계 튕김
           const B = 0.96;
           if (x<bounds.minX || x>bounds.maxX){ vx*=-B; x = THREE.MathUtils.clamp(x, bounds.minX, bounds.maxX); }
           if (y<bounds.minY || y>bounds.maxY){ vy*=-B; y = THREE.MathUtils.clamp(y, bounds.minY, bounds.maxY); }
@@ -485,7 +512,7 @@
       }
       animate();
 
-      // ---------- 리사이즈(프러스텀/텍스트 재계산 + 해시 갱신)
+      // ---------- 리사이즈
       addEventListener('resize', ()=>{
         camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
