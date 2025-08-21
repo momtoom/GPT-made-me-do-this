@@ -1,8 +1,8 @@
-// ===== Haiku Text Particles — robust, DPI-safe, resize-safe =====
+// ===== Minimal, DPR-less, always-visible text particles =====
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d', { alpha: true });
 
-// ---------- Config ----------
+let W = 0, H = 0;
 const LINES = [
   "SPENT HOURS BACKFLOW",
   "SLOWLY RISING ROUND MY SKIN",
@@ -10,71 +10,55 @@ const LINES = [
 ];
 const FONT_FAMILY = "'Host Grotesk', sans-serif";
 
-// 텍스트 박스 목표 폭 비율(화면폭의 82%), 폰트 클램프
-const TARGET_WIDTH_RATIO = 0.82;
-const MAX_TEXT_WIDTH     = 1600;
-const MIN_FONT_PX        = 18;
-const MAX_FONT_PX        = 160;
-
-const STEP   = 3;     // 샘플 간격 (2=촘촘, 3~4=적당)
-const DOT    = 1.2;   // 점 크기 (CSS px 기준)
-const SPRING = 0.03;  // 복귀력
-const DAMP   = 0.90;  // 감쇠
+// 튜닝 파라미터
+const TARGET_WIDTH_RATIO = 0.8; // 텍스트 블록 폭 = 화면의 80%
+const MIN_FONT_PX = 18;
+const MAX_FONT_PX = 160;
+const STEP = 3;      // 2=촘촘, 3~4=적당
+const DOT  = 1.2;    // 점 크기
+const SPRING = 0.03;
+const DAMP   = 0.90;
 const FORCE_NEAR = 2500;
 const FORCE_FAR  = 900;
 const JITTER     = 6;
 
-// ---------- State ----------
-let DPR = 1;
-let W = 0, H = 0;
 const particles = [];
 const mouse = { x: 0, y: 0, down: false };
 
-// ---------- Pointer (CSS 좌표계) ----------
-function setPointer(e){
+function onPointer(e){
   const r = canvas.getBoundingClientRect();
   mouse.x = e.clientX - r.left;
   mouse.y = e.clientY - r.top;
 }
-addEventListener('pointermove', setPointer);
-addEventListener('pointerdown', e => { mouse.down = true; setPointer(e); });
+addEventListener('pointermove', onPointer);
+addEventListener('pointerdown', e => { mouse.down = true; onPointer(e); });
 addEventListener('pointerup',   () => { mouse.down = false; });
 
-// ---------- Resize (풀창 + DPR 보정) ----------
-function resizeCanvas() {
-  const cssW = innerWidth;
-  const cssH = innerHeight;
-
-  DPR = Math.max(1, window.devicePixelRatio || 1);
-  canvas.width  = Math.floor(cssW * DPR);    // 디바이스 픽셀
-  canvas.height = Math.floor(cssH * DPR);
-  canvas.style.width  = cssW + 'px';         // 표시(레아이웃) 크기
-  canvas.style.height = cssH + 'px';
-
-  ctx.setTransform(1,0,0,1,0,0);
-  ctx.scale(DPR, DPR);                        // 이후 좌표는 CSS px로 쓴다
-
-  W = cssW; H = cssH;
-  console.log('[resize]', {W,H,DPR});
+function fit() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width  = W;   // DPR 고려 안 함 (단순화)
+  canvas.height = H;
 }
 
-// ---------- Fonts ----------
 async function waitFont(fontSpec){
   try { await document.fonts.load(fontSpec, "A"); } catch {}
   try { await document.fonts.ready; } catch {}
 }
 
-// ---------- Layout metrics (동적 폰트/정중앙 배치) ----------
 function computeMetrics() {
+  // 기준 크기에서 최장폭 측정
   const baseSize = 100;
   const baseSpec = `500 ${baseSize}px ${FONT_FAMILY}`;
   ctx.font = baseSpec;
 
-  const maxBaseWidth = LINES.reduce((m,t)=>Math.max(m, ctx.measureText(t).width), 0);
-  const targetWidth = Math.max(320, Math.min(W * TARGET_WIDTH_RATIO, MAX_TEXT_WIDTH));
-  const scale = targetWidth / Math.max(1, maxBaseWidth);
+  const maxBaseW = LINES.reduce((m,t)=>Math.max(m, ctx.measureText(t).width), 0);
+  const targetW  = Math.max(320, Math.min(W * TARGET_WIDTH_RATIO, 1600));
+  const scale    = targetW / Math.max(1, maxBaseW);
 
-  const fontSize = Math.round(Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, baseSize * scale)));
+  const fontSize = Math.round(
+    Math.max(MIN_FONT_PX, Math.min(MAX_FONT_PX, baseSize * scale))
+  );
   const fontSpec = `500 ${fontSize}px ${FONT_FAMILY}`;
   const lineH    = Math.round(fontSize * 1.3);
 
@@ -82,52 +66,43 @@ function computeMetrics() {
   const maxLineW = LINES.reduce((m,t)=>Math.max(m, ctx.measureText(t).width), 0);
 
   const totalH = LINES.length * lineH;
-  const baseX  = Math.round((W - maxLineW) / 2); // 중앙 기준 좌측정렬 앵커
+  const baseX  = Math.round((W - maxLineW) / 2);
   const startY = Math.round((H - totalH) / 2);
 
-  return { fontSpec, fontSize, lineH, baseX, startY, maxLineW };
+  return { fontSpec, lineH, baseX, startY, maxLineW };
 }
 
-// ---------- Build Particles (DPR-safe sampling) ----------
 async function buildParticles() {
   particles.length = 0;
-
   const { fontSpec, lineH, baseX, startY, maxLineW } = computeMetrics();
   await waitFont(fontSpec);
 
-  // 1) 메인 캔버스에 텍스트를 CSS 좌표로 그림
-  ctx.clearRect(0,0,W,H);
-  ctx.font = fontSpec;
-  ctx.textBaseline = 'top';
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#fff';
-  LINES.forEach((t,i)=> ctx.fillText(t, baseX, startY + i*lineH));
+  // 오프스크린 캔버스에 텍스트를 그리고 투명 픽셀만 샘플링
+  const off = document.createElement('canvas');
+  off.width = W; off.height = H;
+  const octx = off.getContext('2d', { willReadFrequently: true });
 
-  // 2) 샘플링은 디바이스 픽셀 좌표로 (DPR 곱)
-  const sx = Math.max(0, Math.floor(baseX * DPR));
-  const sy = Math.max(0, Math.floor(startY * DPR));
-  const sw = Math.min(Math.floor(maxLineW * DPR), canvas.width - sx);
-  const sh = Math.min(Math.floor(LINES.length * lineH * DPR), canvas.height - sy);
+  octx.clearRect(0,0,W,H);
+  octx.font = fontSpec;
+  octx.textBaseline = 'top';
+  octx.textAlign = 'left';
+  octx.fillStyle = '#fff';
+  LINES.forEach((t,i)=> octx.fillText(t, baseX, startY + i*lineH));
 
-  // 텍스트 흔적 제거(렌더는 파티클만)
-  ctx.clearRect(0,0,W,H);
+  const minX = Math.max(0, baseX);
+  const maxX = Math.min(W, baseX + maxLineW);
+  const minY = Math.max(0, startY);
+  const maxY = Math.min(H, startY + LINES.length * lineH);
 
-  if (sw <= 0 || sh <= 0) {
-    console.warn('[buildParticles] invalid sample rect', {sx,sy,sw,sh});
-    return;
-  }
+  const img = octx.getImageData(minX, minY, maxX - minX, maxY - minY);
+  const data = img.data, iw = img.width, ih = img.height;
 
-  const img = canvas.getContext('2d', { willReadFrequently: true }).getImageData(sx, sy, sw, sh);
-  const data = img.data, iw = img.width;
-
-  const stepDev = Math.max(1, Math.round(STEP * DPR)); // 디바이스 픽셀 스텝
-
-  for (let yDev = 0; yDev < img.height; yDev += stepDev) {
-    for (let xDev = 0; xDev < img.width; xDev += stepDev) {
-      const a = data[(yDev * iw + xDev) * 4 + 3];
+  for (let y = 0; y < ih; y += STEP) {
+    for (let x = 0; x < iw; x += STEP) {
+      const a = data[(y * iw + x) * 4 + 3];
       if (a > 10) {
-        const gx = (sx + xDev) / DPR;  // 디바이스 → CSS
-        const gy = (sy + yDev) / DPR;
+        const gx = minX + x;
+        const gy = minY + y;
         particles.push({
           x:  gx + (Math.random()-0.5) * JITTER,
           y:  gy + (Math.random()-0.5) * JITTER,
@@ -140,10 +115,18 @@ async function buildParticles() {
   console.log('[particles]', particles.length);
 }
 
-// ---------- Loop ----------
 function loop(){
+  // 배경 잔상
   ctx.fillStyle = 'rgba(11,13,16,0.18)';
   ctx.fillRect(0,0,W,H);
+
+  // 디버그: 항상 보이는 빨간 점 (화면 중앙)
+  ctx.fillStyle = '#ff4040';
+  ctx.beginPath();
+  ctx.arc(W/2, H/2, 2, 0, Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle = '#fff';
   for (const p of particles) {
     const dx = p.x - mouse.x;
     const dy = p.y - mouse.y;
@@ -163,25 +146,23 @@ function loop(){
     p.x += p.vx;
     p.y += p.vy;
 
-    ctx.fillStyle = '#fff';
     ctx.fillRect(p.x, p.y, DOT, DOT);
   }
+
   requestAnimationFrame(loop);
 }
 
-// ---------- Resize handling ----------
+// 리사이즈: 즉시 반영 + 재샘플링
 let resizeTimer = null;
 addEventListener('resize', () => {
-  resizeCanvas();                  // 즉시 사이즈 반영
+  fit();
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { // 디바운스 후 재샘플링
-    buildParticles();
-  }, 150);
+  resizeTimer = setTimeout(buildParticles, 120);
 });
 
-// ---------- Boot ----------
+// 부팅
 (async function ready(){
-  resizeCanvas();        // 풀창 + DPR 스케일
-  await buildParticles();// 샘플링(폰트 로드 포함)
+  fit();
+  await buildParticles();
   loop();
 })();
