@@ -7,38 +7,43 @@
   <style>
     html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden}
     #app{position:fixed;inset:0}
+    #debug{position:fixed;left:12px;bottom:12px;color:#8fa;opacity:.7;
+           font:12px/1.2 ui-monospace,monospace;white-space:pre}
   </style>
 </head>
 <body>
   <div id="app"></div>
+  <div id="debug"></div>
 
   <script type="module">
+    // --- safe logger (debug div가 없으면 무시)
     const dbg = document.getElementById('debug');
-    dbg.textContent = 'loading three...';
+    const log = (s)=>{ if(dbg) dbg.textContent = s; };
+    log('loading three...');
 
     async function tryImport(url){
-      try{ const m = await import(url); dbg.textContent = 'loaded: '+url; return m; }
-      catch(e){ dbg.textContent = 'failed: '+url; return null; }
+      try{ const m = await import(url); log('loaded: '+url); return m; }
+      catch(e){ log('failed: '+url); return null; }
     }
 
     async function loadThree(){
-      // 여러 CDN 순차 시도 (캔버스 네트워크 제한 대응)
+      // 여러 CDN 순차 시도
       const sources = [
         {
           core: 'https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js',
-          extra: 'https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/controls/OrbitControls.js'
+          extra:'https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/controls/OrbitControls.js'
         },
         {
           core: 'https://unpkg.com/three@0.157.0/build/three.module.js',
-          extra: 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js'
+          extra:'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js'
         },
         {
           core: 'https://esm.sh/three@0.157.0',
-          extra: 'https://esm.sh/three@0.157.0/examples/jsm/controls/OrbitControls.js'
+          extra:'https://esm.sh/three@0.157.0/examples/jsm/controls/OrbitControls.js'
         },
         {
           core: 'https://cdn.skypack.dev/three@0.157.0',
-          extra: 'https://cdn.skypack.dev/three@0.157.0/examples/jsm/controls/OrbitControls.js'
+          extra:'https://cdn.skypack.dev/three@0.157.0/examples/jsm/controls/OrbitControls.js'
         }
       ];
       for (const s of sources){
@@ -54,19 +59,21 @@
     (async ()=>{
       const mod = await loadThree();
       if(!mod){
-        dbg.textContent = 'three.js 불러오기 실패 — 미리보기 환경에서 외부 스크립트 차단일 수 있음';
+        log('three.js 불러오기 실패 — 미리보기 환경에서 외부 스크립트 차단일 수 있음');
         const warn = document.createElement('div');
         warn.style.position='fixed'; warn.style.inset='0'; warn.style.display='grid';
-        warn.style.placeItems='center'; warn.style.color='#9ad'; warn.style.font='14px ui-monospace,monospace';
-        warn.innerHTML = 'External import blocked.
-아래 코드의 <script type="module">를 로컬에서 실행하면 정상 동작합니다.';
+        warn.style.placeItems='center'; warn.style.color='#9ad';
+        warn.style.font='14px ui-monospace,monospace'; warn.style.textAlign='center';
+        warn.innerHTML = `External module import blocked.<br>
+캔버스 미리보기에서 외부 모듈이 차단된 것 같아요.<br>
+같은 파일을 로컬 브라우저에서 열면 정상 동작합니다.`;
         document.body.appendChild(warn);
         return;
       }
 
       const { THREE, OrbitControls } = mod;
 
-      // ===== 설정값 (안전한 기본값) =====
+      // ===== 설정값 =====
       const TEXT_LINES = [
         'SPENT HOURS BACKFLOW',
         'SLOWLY RISING ROUND MY SKIN',
@@ -74,7 +81,6 @@
       ];
       const FONT_FAMILY = "'Host Grotesk', sans-serif";
 
-      // 룩 & 물리 파라미터
       const DOT_SIZE = 0.02;
       const SWARM_COUNT_FACTOR = 0.46;
       const GRID_STEP = 3;
@@ -111,7 +117,7 @@
 
       scene.fog = new THREE.FogExp2(0x0b0d10, 0.9);
 
-      // ===== 텍스트 마스크 → 포인트 생성 =====
+      // ===== 텍스트 마스크 → 포인트 =====
       function makeTextPoints(){
         const W = Math.max(1024, innerWidth);
         const H = Math.max(600, innerHeight);
@@ -162,7 +168,7 @@
 
       const { pts: textPoints, rect: textRect } = makeTextPoints();
 
-      // ===== 파티클 지오메트리 =====
+      // ===== 파티클 =====
       const particleCount = Math.min(
         textPoints.length,
         Math.floor((innerWidth*innerHeight)/1000 * SWARM_COUNT_FACTOR)
@@ -234,13 +240,12 @@
         return pool.slice(0, count).map(o=>o.i);
       }
 
-      // ===== 공간 해시 (separation용) =====
+      // ===== 공간 해시 & 애니메이션 =====
       const hash = new Map();
       function key(ix,iy){ return (ix<<16) ^ iy; }
       function ix(x){ return Math.floor(x/HASH_CELL); }
       function iy(y){ return Math.floor(y/HASH_CELL); }
 
-      // ===== 애니메이션 루프 =====
       let lastT = performance.now(); let frame=0;
 
       function animate(){
@@ -336,3 +341,4 @@
   </script>
 </body>
 </html>
+
