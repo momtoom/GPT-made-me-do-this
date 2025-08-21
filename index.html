@@ -69,10 +69,10 @@
       ];
       const FONT_FAMILY = "'Host Grotesk', system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 
-      const GRID_STEP = 2;                 // (유지) 글자 해상도
-      const DOT_SIZE  = 0.028;             // 0.022 → 0.028 : 적은 입자라도 또렷하게
-      const SWARM_DENSITY = 520;           // 250 → 520 : 화면당 입자 수 ↓ (노이즈 컷)
-      const EXTRA_PARTICLE_MULT = 1.02;    // 1.1 → 1.02 : 텍스트 대비 여분 축소(과밀 방지)
+      const GRID_STEP = 1;                 // 글자 해상도
+      const DOT_SIZE  = 0.028;             // 적은 입자라도 또렷하게
+      const SWARM_DENSITY = 20;           // 화면당 입자 수 ↓
+      const EXTRA_PARTICLE_MULT = 1;    // 1.1 → 1.02 : 텍스트 대비 여분 축소(과밀 방지)
       
       const CURL_SCALE = 0.42;             // 0.65 → 0.42 : 흐름장 세기 낮춤(요동 완화)
       const DAMP = 0.975;                  // 0.965 → 0.975 : 감쇠 강화로 미세 떨림 제거
