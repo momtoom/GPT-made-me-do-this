@@ -8,7 +8,7 @@ AI와 인간의 협업 실험을 기록한 프로젝트입니다. (인간은 AI�
 ---
 
 ## 🎮 Demo
-👉 (GitHub Pages 설정 후 여기에 링크 추가)
+👉 https://momtoom.github.io/GPT-made-me-do-this/
 
 ---
 
