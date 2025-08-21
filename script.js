@@ -2,7 +2,7 @@ const canvas = document.getElementById('stage');
 // alpha:true 로 두자 (투명채널 필요)
 const ctx = canvas.getContext('2d', { alpha: true });
 
-const DPR = Math.min(2, window.devicePixelRatio || 1);
+const DPR = Math.min(1, window.devicePixelRatio || 1);
 let W = 0, H = 0;
 
 function fit() {
@@ -20,7 +20,7 @@ const LINES = [
   "FOG DISSOLVES THE WALLS"
 ];
 
-const FONT_SIZE = Math.round(42 * DPR);
+const FONT_SIZE = Math.round(100 * DPR);
 const LINE_H = Math.round(FONT_SIZE * 1.35);
 const FONT = `${FONT_SIZE}px 'Host Grotesk', sans-serif`;
 
