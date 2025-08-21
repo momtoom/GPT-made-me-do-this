@@ -6,9 +6,19 @@ const DPR = Math.min(1, window.devicePixelRatio || 1);
 let W = 0, H = 0;
 
 function fit() {
-  W = Math.max(320, Math.floor(window.innerWidth * DPR));
-  H = Math.max(320, Math.floor(window.innerHeight * DPR));
-  canvas.width = W;
+  // CSS 픽셀 기준 실제 표시 크기
+  const cssW = Math.max(1024, window.innerWidth);
+  const cssH = window.innerHeight;
+
+  // 캔버스의 ‘표시 크기’도 명시적으로 맞춰주면 레이아웃이 안정적이에요
+  const el = canvas; // id="stage"
+  el.style.width = cssW + 'px';
+  el.style.height = cssH + 'px';
+
+  // 렌더링 해상도(DPR 적용)
+  W = Math.floor(cssW * DPR);
+  H = Math.floor(cssH * DPR);
+  canvas.width  = W;
   canvas.height = H;
 }
 fit();
