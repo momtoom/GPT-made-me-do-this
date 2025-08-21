@@ -14,8 +14,8 @@ const FONT_FAMILY = "'Host Grotesk', sans-serif";
 const TARGET_WIDTH_RATIO = 0.8; // 텍스트 블록 폭 = 화면의 80%
 const MIN_FONT_PX = 18;
 const MAX_FONT_PX = 160;
-const STEP = 3;      // 2=촘촘, 3~4=적당
-const DOT  = 1.2;    // 점 크기
+const STEP = 1;      // 2=촘촘, 3~4=적당
+const DOT  = 1;    // 점 크기
 const SPRING = 0.03;
 const DAMP   = 0.90;
 const FORCE_NEAR = 2500;
