@@ -105,33 +105,37 @@ async function buildParticles() {
   const { fontSpec, lineH, baseX, startY, maxLineW } = computeMetrics();
   await waitFont(fontSpec);
 
+  // 1) 메인 캔버스는 계속 CSS 좌표계로 그림 (ctx.scale(DPR,DPR) 상태)
   ctx.clearRect(0,0,W,H);
   ctx.font = fontSpec;
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
   ctx.fillStyle = '#fff';
-
-  // 텍스트 찍기
   LINES.forEach((t,i)=> ctx.fillText(t, baseX, startY + i*lineH));
 
-  // 텍스트 영역만 샘플링(성능↑, 잘림 방지)
-  const minX = Math.max(0, baseX);
-  const maxX = Math.min(W, baseX + maxLineW);
-  const minY = Math.max(0, startY);
-  const maxY = Math.min(H, startY + LINES.length * lineH);
+  // 2) ❗️샘플링은 "디바이스 픽셀" 좌표로 해야 함
+  const sx = Math.max(0, Math.floor(baseX    * DPR));
+  const sy = Math.max(0, Math.floor(startY   * DPR));
+  const sw = Math.min(Math.floor(maxLineW    * DPR), Math.floor(W * DPR) - sx);
+  const sh = Math.min(Math.floor(LINES.length * lineH * DPR), Math.floor(H * DPR) - sy);
 
-  const img = ctx.getImageData(minX, minY, maxX - minX, maxY - minY);
-  const data = img.data, iw = img.width;
-
-  // 텍스트 지우고 입자만 그릴 준비
+  // 텍스트 흔적 지워두기 (렌더는 파티클만)
   ctx.clearRect(0,0,W,H);
 
-  for (let y = 0; y < img.height; y += STEP) {
-    for (let x = 0; x < img.width; x += STEP) {
-      const a = data[(y * iw + x) * 4 + 3];
+  // 3) 디바이스 픽셀 기준으로 픽셀 데이터 읽기
+  const img = canvas.getContext('2d', { willReadFrequently: true }).getImageData(sx, sy, sw, sh);
+  const data = img.data, iw = img.width;
+
+  // 4) 디바이스 픽셀 스텝 계산 (CSS STEP → DPR 곱)
+  const stepDev = Math.max(1, Math.round(STEP * DPR));
+
+  for (let yDev = 0; yDev < img.height; yDev += stepDev) {
+    for (let xDev = 0; xDev < img.width; xDev += stepDev) {
+      const a = data[(yDev * iw + xDev) * 4 + 3];
       if (a > 10) {
-        const gx = minX + x;
-        const gy = minY + y;
+        // 디바이스 → CSS 좌표로 되돌림
+        const gx = (sx + xDev) / DPR;
+        const gy = (sy + yDev) / DPR;
         particles.push({
           x:  gx + (Math.random()-0.5) * JITTER,
           y:  gy + (Math.random()-0.5) * JITTER,
