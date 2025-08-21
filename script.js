@@ -74,8 +74,19 @@ function computeMetrics() {
 
 async function buildParticles() {
   particles.length = 0;
+
+  // 1) 폰트 가족부터 로드(기본 크기 스펙)
+  const baseSpecForLoad = `500 100px ${FONT_FAMILY}`;
+  await waitFont(baseSpecForLoad);
+
+  // 2) 로드된 폰트로 정확한 폭/크기 계산
   const { fontSpec, lineH, baseX, startY, maxLineW } = computeMetrics();
+
+  // 3) 최종 스펙도 보장(가끔 fallback 방지)
   await waitFont(fontSpec);
+
+  // ...
+}
 
   // 오프스크린 캔버스에 텍스트를 그리고 투명 픽셀만 샘플링
   const off = document.createElement('canvas');
