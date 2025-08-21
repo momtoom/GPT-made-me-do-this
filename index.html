@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Vibe Canvas</title>
+  <style>
+    html,body{margin:0;height:100%;background:#0b0d10;color:#cfd8dc;font-family:system-ui,sans-serif}
+    #ui{position:fixed;left:16px;top:16px;background:rgba(255,255,255,.04);padding:12px 14px;border-radius:12px;backdrop-filter:blur(6px)}
+    canvas{display:block;width:100vw;height:100vh}
+    .hint{font-size:12px;opacity:.7;margin-top:4px}
+  </style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="ui">
+    <div><strong>Vibe Canvas</strong> — 입자 애니</div>
+    <div class="hint">터치/드래그로 휘저어봐</div>
+  </div>
+  <script src="script.js" type="module"></script>
+</body>
+</html>
