@@ -11,12 +11,30 @@
   <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@500&display=swap" rel="stylesheet">
 
   <style>
-    html,body{margin:0;height:100%;background:#0b0d10;}
-    canvas{display:block;width:100vw;height:100vh;touch-action:none;}
+    html,body {
+      margin:0;
+      height:100%;
+      background:#0b0d10;
+    }
+    body {
+      font-family:'Host Grotesk',system-ui,-apple-system,sans-serif;
+    }
+    canvas {
+      display:block;
+      width:100vw;
+      height:100vh;
+      touch-action:none;
+    }
   </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
-  <script defer src="script.js?v=13"></script>
+
+  <!-- script.js 항상 최신 버전으로 불러오기 -->
+  <script>
+    const script = document.createElement("script");
+    script.src = "script.js?v=" + Date.now(); // 매번 다른 값이 붙음
+    document.body.appendChild(script);
+  </script>
 </body>
 </html>
