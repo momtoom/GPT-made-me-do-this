@@ -3,289 +3,336 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Vibe Murmuration 3D</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@500&display=swap" rel="stylesheet">
+  <title>Vibe Murmuration 3D — minimal working example</title>
   <style>
     html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden}
     #app{position:fixed;inset:0}
-    #debug{position:fixed;left:12px;bottom:12px;color:#8fa;opacity:.6;font:12px/1.2 ui-monospace,monospace}
   </style>
 </head>
 <body>
   <div id="app"></div>
-  <div id="debug"></div>
 
-  <!-- three.js CDN -->
   <script type="module">
-    import * as THREE from "https://unpkg.com/three@0.157.0/build/three.module.js";
-    import { OrbitControls } from "https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js";
+    const dbg = document.getElementById('debug');
+    dbg.textContent = 'loading three...';
 
-    // ===== 설정값 =====
-    const TEXT_LINES = [
-      "SPENT HOURS BACKFLOW",
-      "SLOWLY RISING ROUND MY SKIN",
-      "FOG DISSOLVES THE WALLS"
-    ];
-    const FONT_FAMILY = "'Host Grotesk', sans-serif";
-    const DOT_SIZE = 0.02;           // 입자 크기 (세계 좌표)
-    const SWARM_COUNT_FACTOR = 0.45; // 화면 대비 입자 수
-    const CURL_SCALE = 0.6;          // 커브 흐름 세기
-    const DAMP = 0.96;               // 감쇠
-    const MAX_SPD = 1.8;             // 속도 제한
-    const MOUSE_PULL = 0.6;          // 마우스 추적(약하게)
-    const REVEAL_RADIUS = 0.25;      // 커서 주변 텍스트 마스크 반경(세계 좌표)
-    const SPRING = 5.0;              // 텍스트 목표로 당기는 힘
-    const UNCLAIM_DIST = 0.015;      // 목표 근접 시 해제
-    const GRID_STEP = 3;             // 텍스트 샘플 간격(px) — 너무 작으면 과밀(→그리드 느낌), 3~4 추천
+    async function tryImport(url){
+      try{ const m = await import(url); dbg.textContent = 'loaded: '+url; return m; }
+      catch(e){ dbg.textContent = 'failed: '+url; return null; }
+    }
 
-    // ===== 장면 기본 =====
-    const el = document.getElementById("app");
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.01, 20);
-    camera.position.set(0, 0, 1.6);
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.setSize(innerWidth, innerHeight);
-    el.appendChild(renderer.domElement);
-
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true; controls.enableZoom = false; controls.enablePan = false;
-
-    // 톤 낮은 안개로 깊이감
-    scene.fog = new THREE.FogExp2(0x0b0d10, 0.9);
-
-    // ===== 텍스트 마스크 만들기 (캔버스 → 알파 샘플) =====
-    function makeTextPoints() {
-      const W = Math.max(1024, innerWidth);
-      const H = Math.max(600, innerHeight);
-      const cvs = document.createElement("canvas");
-      cvs.width = W; cvs.height = H;
-      const ctx = cvs.getContext("2d", { willReadFrequently: true });
-
-      // 동적 폰트 크기
-      const base = 100;
-      ctx.font = `500 ${base}px ${FONT_FAMILY}`;
-      const maxBase = TEXT_LINES.reduce((m,t)=>Math.max(m, ctx.measureText(t).width), 1);
-      const target = Math.min(W*0.8, 1600);
-      const scale = target / maxBase;
-      const fontPx = Math.max(18, Math.min(170, Math.round(base*scale)));
-      const lineH = Math.round(fontPx*1.3);
-      ctx.font = `500 ${fontPx}px ${FONT_FAMILY}`;
-      ctx.textBaseline = "top"; ctx.textAlign = "left";
-      ctx.fillStyle = "#fff";
-
-      const maxLineW = TEXT_LINES.reduce((m,t)=>Math.max(m, ctx.measureText(t).width), 0);
-      const baseX = Math.round((W - maxLineW)/2);
-      const startY = Math.round((H - TEXT_LINES.length*lineH)/2);
-
-      TEXT_LINES.forEach((t,i)=> ctx.fillText(t, baseX, startY + i*lineH));
-
-      const minX = Math.max(0, baseX);
-      const maxX = Math.min(W, baseX + maxLineW);
-      const minY = Math.max(0, startY);
-      const maxY = Math.min(H, startY + TEXT_LINES.length*lineH);
-
-      const img = ctx.getImageData(minX, minY, maxX-minX, maxY-minY);
-      const data = img.data, iw=img.width, ih=img.height;
-
-      const pts = [];
-      for (let y = 0; y < ih; y += GRID_STEP) {
-        for (let x = 0; x < iw; x += GRID_STEP) {
-          const a = data[(y*iw + x)*4 + 3];
-          if (a > 10) {
-            // 화면 픽셀을 월드 좌표(-0.5~0.5 정규화)로 투영
-            const nx = (minX + x)/W - 0.5;
-            const ny = (minY + y)/H - 0.5;
-            // 살짝 지터(격자 느낌 제거)
-            pts.push(new THREE.Vector3(nx + (Math.random()-0.5)*(1/W)*6,
-                                       -(ny + (Math.random()-0.5)*(1/H)*6),
-                                       0));
-          }
+    async function loadThree(){
+      // 여러 CDN 순차 시도 (캔버스 네트워크 제한 대응)
+      const sources = [
+        {
+          core: 'https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js',
+          extra: 'https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/controls/OrbitControls.js'
+        },
+        {
+          core: 'https://unpkg.com/three@0.157.0/build/three.module.js',
+          extra: 'https://unpkg.com/three@0.157.0/examples/jsm/controls/OrbitControls.js'
+        },
+        {
+          core: 'https://esm.sh/three@0.157.0',
+          extra: 'https://esm.sh/three@0.157.0/examples/jsm/controls/OrbitControls.js'
+        },
+        {
+          core: 'https://cdn.skypack.dev/three@0.157.0',
+          extra: 'https://cdn.skypack.dev/three@0.157.0/examples/jsm/controls/OrbitControls.js'
         }
+      ];
+      for (const s of sources){
+        const THREE = await tryImport(s.core);
+        if (!THREE) continue;
+        const Controls = await tryImport(s.extra);
+        if (!Controls) continue;
+        return { THREE, OrbitControls: Controls.OrbitControls };
       }
-      // 텍스트 영역 경계(커서 오버 판정용)
-      const rect = {
-        x: minX/W - 0.5, y: -(minY/H - 0.5),
-        w: (maxX-minX)/W, h: -(maxY-minY)/H
-      };
-      return { pts, rect };
+      return null;
     }
 
-    // ===== 파티클 세팅 =====
-    const { pts: textPoints, rect: textRect } = makeTextPoints();
-
-    const particleCount = Math.min(
-      textPoints.length,
-      Math.floor((innerWidth*innerHeight)/1000 * SWARM_COUNT_FACTOR)
-    );
-
-    const geom = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const velocities = new Float32Array(particleCount * 3);
-    const targets = new Float32Array(particleCount * 3); // 텍스트 타깃
-
-    // 처음엔 화면 가장자리(원형 쉘)에서 스폰
-    for (let i=0; i<particleCount; i++){
-      const th = Math.random()*Math.PI*2;
-      const ph = Math.random()*Math.PI;
-      const r = 0.6 + Math.random()*0.15;
-      positions[i*3+0] = Math.cos(th)*Math.sin(ph)*r;
-      positions[i*3+1] = Math.sin(th)*Math.sin(ph)*r;
-      positions[i*3+2] = Math.cos(ph)*r*0.2; // 살짝 깊이
-
-      velocities[i*3+0] = (Math.random()-0.5)*0.2;
-      velocities[i*3+1] = (Math.random()-0.5)*0.2;
-      velocities[i*3+2] = (Math.random()-0.5)*0.05;
-
-      // 초기 타깃은 아무것도(0,0,0). 커서가 텍스트 위에 갈 때만 채움.
-      targets[i*3+0]=999; targets[i*3+1]=999; targets[i*3+2]=0;
-    }
-
-    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geom.setAttribute("velocity", new THREE.BufferAttribute(velocities, 3));
-    geom.setAttribute("target",   new THREE.BufferAttribute(targets, 3));
-
-    const mat = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: DOT_SIZE,
-      sizeAttenuation: true,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false
-    });
-
-    const points = new THREE.Points(geom, mat);
-    scene.add(points);
-
-    // ===== 마우스 좌표(월드) =====
-    const mouseNdc = new THREE.Vector2(0,0);
-    const mouseWorld = new THREE.Vector3();
-    const plane = new THREE.Plane(new THREE.Vector3(0,0,1), 0); // z=0 평면
-    const raycaster = new THREE.Raycaster();
-
-    function onPointer(e){
-      mouseNdc.x = (e.clientX / innerWidth) * 2 - 1;
-      mouseNdc.y = -(e.clientY / innerHeight) * 2 + 1;
-      raycaster.setFromCamera(mouseNdc, camera);
-      raycaster.ray.intersectPlane(plane, mouseWorld);
-    }
-    addEventListener("pointermove", onPointer);
-
-    // 텍스트 영역 안에 있는지 (히스테리시스 약간)
-    function mouseOverText(){
-      const m = 0.02;
-      const x = mouseWorld.x, y = mouseWorld.y;
-      return (x > textRect.x - m && x < textRect.x + textRect.w + m &&
-              y < textRect.y - m && y > textRect.y + textRect.h - m);
-    }
-
-    // 근처 텍스트 포인트 몇 개를 샘플 (KNN 대충)
-    function claimTargetsAround(mx,my, count=200){
-      // 무작위로 뽑아서 가까운 순으로 정렬(간단/빠름)
-      const pool = [];
-      for (let i=0;i<textPoints.length;i+=Math.floor(1+Math.random()*4)){
-        const tp = textPoints[i];
-        const dx = tp.x - mx, dy = tp.y - my;
-        const d2 = dx*dx + dy*dy;
-        if (d2 < REVEAL_RADIUS*REVEAL_RADIUS) pool.push({i, d2});
-      }
-      pool.sort((a,b)=>a.d2-b.d2);
-      return pool.slice(0, count).map(o=>o.i);
-    }
-
-    // 각 프레임 업데이트
-    const tmp = new THREE.Vector3();
-    const dbg = document.getElementById("debug");
-    let lastT = performance.now();
-
-    function animate(){
-      requestAnimationFrame(animate);
-      const t = performance.now() * 0.001;
-      const dt = Math.min(0.033, (t - lastT)); lastT = t;
-
-      const pos = geom.attributes.position.array;
-      const vel = geom.attributes.velocity.array;
-      const tar = geom.attributes.target.array;
-
-      // 1) 커서가 텍스트 위면 근처 타깃을 “할당”
-      if (mouseOverText()){
-        const candidates = claimTargetsAround(mouseWorld.x, mouseWorld.y, 400);
-        // 파티클 일부에게만 타깃 세팅 (너무 빽빽하지 않도록)
-        for (let c=0; c<candidates.length; c+=3){
-          const idx = (Math.random()* (pos.length/3) | 0);
-          const tp = textPoints[candidates[c]];
-          tar[idx*3+0] = tp.x;
-          tar[idx*3+1] = tp.y;
-          tar[idx*3+2] = 0;
-        }
+    (async ()=>{
+      const mod = await loadThree();
+      if(!mod){
+        dbg.textContent = 'three.js 불러오기 실패 — 미리보기 환경에서 외부 스크립트 차단일 수 있음';
+        const warn = document.createElement('div');
+        warn.style.position='fixed'; warn.style.inset='0'; warn.style.display='grid';
+        warn.style.placeItems='center'; warn.style.color='#9ad'; warn.style.font='14px ui-monospace,monospace';
+        warn.innerHTML = 'External import blocked.
+아래 코드의 <script type="module">를 로컬에서 실행하면 정상 동작합니다.';
+        document.body.appendChild(warn);
+        return;
       }
 
-      // 2) 업데이트 루프
-      for (let i=0; i<pos.length; i+=3){
-        // 현재 위치/속도
-        let x = pos[i],   y = pos[i+1],   z = pos[i+2];
-        let vx = vel[i],  vy = vel[i+1],  vz = vel[i+2];
+      const { THREE, OrbitControls } = mod;
 
-        // (a) curl-like flow → 자연스러운 곡선
-        const fx = Math.sin((x+y)*1.2 + t*0.9) - Math.cos((x-y)*1.0 + t*1.1)*0.6;
-        const fy = Math.cos((x-y)*1.1 + t*0.8) + Math.sin((x+y)*1.3 + t*0.7)*0.6;
-        vx += fx * CURL_SCALE * dt;
-        vy += fy * CURL_SCALE * dt;
+      // ===== 설정값 (안전한 기본값) =====
+      const TEXT_LINES = [
+        'SPENT HOURS BACKFLOW',
+        'SLOWLY RISING ROUND MY SKIN',
+        'FOG DISSOLVES THE WALLS'
+      ];
+      const FONT_FAMILY = "'Host Grotesk', sans-serif";
 
-        // (b) 가벼운 마우스 추적
-        vx += (mouseWorld.x - x) * MOUSE_PULL * dt;
-        vy += (mouseWorld.y - y) * MOUSE_PULL * dt;
+      // 룩 & 물리 파라미터
+      const DOT_SIZE = 0.02;
+      const SWARM_COUNT_FACTOR = 0.46;
+      const GRID_STEP = 3;
 
-        // (c) 텍스트 타깃 스프링(설정된 입자만)
-        const tx = tar[i], ty = tar[i+1];
-        if (tx !== 999){ // 타깃이 있으면
-          vx += (tx - x) * SPRING * dt;
-          vy += (ty - y) * SPRING * dt;
+      const CURL_SCALE = 0.55;
+      const DAMP = 0.965;
+      const MAX_SPD = 1.85;
+      const MOUSE_PULL = 0.55;
 
-          // 충분히 근접하면 타깃 해제 → 다시 떼로
-          const dx = tx - x, dy = ty - y;
-          if (dx*dx + dy*dy < UNCLAIM_DIST*UNCLAIM_DIST) {
-            tar[i]=tar[i+1]=999; tar[i+2]=0;
-          }
-        }
+      const REVEAL_RADIUS = 0.25;
+      const SPRING = 5.0;
+      const UNCLAIM_DIST = 0.015;
+      const CLAIM_BATCH = 420;
 
-        // (d) 감쇠 + 속도 캡
-        vx *= DAMP; vy *= DAMP; vz *= DAMP;
-        const sp = Math.hypot(vx, vy, vz);
-        if (sp > MAX_SPD){ const s = MAX_SPD/sp; vx*=s; vy*=s; vz*=s; }
+      const SEP_RADIUS = 0.035;
+      const SEP_FORCE  = 0.85;
+      const HASH_CELL  = 0.06;
+      const FLOCK_EVERY_N = 2;
 
-        // (e) 위치 갱신 + 소프트 바운스
-        x += vx*dt; y += vy*dt; z += vz*dt*0.2;
-        const B = 0.95;
-        if (x<-0.62||x>0.62){ vx*=-B; x=clamp(x,-0.62,0.62); }
-        if (y<-0.35||y>0.35){ vy*=-B; y=clamp(y,-0.35,0.35); }
+      // ===== Scene =====
+      const el = document.getElementById('app');
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.01, 20);
+      camera.position.set(0,0,1.6);
 
-        pos[i]=x; pos[i+1]=y; pos[i+2]=z;
-        vel[i]=vx; vel[i+1]=vy; vel[i+2]=vz;
-      }
-
-      geom.attributes.position.needsUpdate = true;
-      geom.attributes.velocity.needsUpdate = true;
-      geom.attributes.target.needsUpdate = true;
-
-      controls.update();
-      renderer.render(scene, camera);
-
-      // 디버그(원하면 끄기)
-      dbg.textContent = `pts:${pos.length/3}  curl:${CURL_SCALE}  spring:${SPRING}  reveal:${REVEAL_RADIUS}`;
-    }
-    animate();
-
-    // 리사이즈
-    addEventListener("resize", ()=>{
-      camera.aspect = innerWidth/innerHeight;
-      camera.updateProjectionMatrix();
+      const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
       renderer.setSize(innerWidth, innerHeight);
-    });
+      renderer.setClearColor(0x0b0d10, 1);
+      el.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true; controls.enableZoom = false; controls.enablePan = false;
+
+      scene.fog = new THREE.FogExp2(0x0b0d10, 0.9);
+
+      // ===== 텍스트 마스크 → 포인트 생성 =====
+      function makeTextPoints(){
+        const W = Math.max(1024, innerWidth);
+        const H = Math.max(600, innerHeight);
+        const cvs = document.createElement('canvas');
+        cvs.width = W; cvs.height = H;
+        const ctx = cvs.getContext('2d', { willReadFrequently:true });
+
+        const base = 100; ctx.font = `500 ${base}px ${FONT_FAMILY}`;
+        const maxBase = TEXT_LINES.reduce((m,t)=>Math.max(m, ctx.measureText(t).width), 1);
+        const target = Math.min(W*0.8, 1600);
+        const scale = target/maxBase;
+        const fontPx = Math.max(18, Math.min(170, Math.round(base*scale)));
+        const lineH = Math.round(fontPx*1.28);
+        ctx.font = `500 ${fontPx}px ${FONT_FAMILY}`;
+        ctx.textBaseline = 'top'; ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
+
+        const maxLineW = TEXT_LINES.reduce((m,t)=>Math.max(m, ctx.measureText(t).width), 0);
+        const baseX = Math.round((W - maxLineW)/2);
+        const startY = Math.round((H - TEXT_LINES.length*lineH)/2);
+        TEXT_LINES.forEach((t,i)=> ctx.fillText(t, baseX, startY + i*lineH));
+
+        const minX = Math.max(0, baseX);
+        const maxX = Math.min(W, baseX + maxLineW);
+        const minY = Math.max(0, startY);
+        const maxY = Math.min(H, startY + TEXT_LINES.length*lineH);
+
+        const img = ctx.getImageData(minX, minY, maxX-minX, maxY-minY);
+        const data = img.data, iw=img.width, ih=img.height;
+
+        const pts = [];
+        for (let y=0; y<ih; y+=GRID_STEP){
+          for (let x=0; x<iw; x+=GRID_STEP){
+            const a = data[(y*iw + x)*4 + 3];
+            if (a>10){
+              const nx = (minX + x)/W - 0.5;
+              const ny = (minY + y)/H - 0.5;
+              pts.push(new THREE.Vector3(
+                nx + (Math.random()-0.5)*(1/W)*6,
+                -(ny + (Math.random()-0.5)*(1/H)*6),
+                0
+              ));
+            }
+          }
+        }
+        const rect = { x: minX/W - 0.5, y: -(minY/H - 0.5), w: (maxX-minX)/W, h: -(maxY-minY)/H };
+        return { pts, rect };
+      }
+
+      const { pts: textPoints, rect: textRect } = makeTextPoints();
+
+      // ===== 파티클 지오메트리 =====
+      const particleCount = Math.min(
+        textPoints.length,
+        Math.floor((innerWidth*innerHeight)/1000 * SWARM_COUNT_FACTOR)
+      );
+
+      const geom = new THREE.BufferGeometry();
+      const positions = new Float32Array(particleCount*3);
+      const velocities = new Float32Array(particleCount*3);
+      const targets   = new Float32Array(particleCount*3);
+
+      for (let i=0;i<particleCount;i++){
+        const th = Math.random()*Math.PI*2;
+        const ph = Math.random()*Math.PI;
+        const r  = 0.6 + Math.random()*0.15;
+        positions[i*3+0] = Math.cos(th)*Math.sin(ph)*r;
+        positions[i*3+1] = Math.sin(th)*Math.sin(ph)*r;
+        positions[i*3+2] = Math.cos(ph)*r*0.2;
+
+        velocities[i*3+0] = (Math.random()-0.5)*0.2;
+        velocities[i*3+1] = (Math.random()-0.5)*0.2;
+        velocities[i*3+2] = (Math.random()-0.5)*0.05;
+
+        targets[i*3+0]=999; targets[i*3+1]=999; targets[i*3+2]=0;
+      }
+
+      geom.setAttribute('position', new THREE.BufferAttribute(positions,3));
+      geom.setAttribute('velocity', new THREE.BufferAttribute(velocities,3));
+      geom.setAttribute('target',   new THREE.BufferAttribute(targets,3));
+
+      const mat = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: DOT_SIZE,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false
+      });
+
+      const points = new THREE.Points(geom, mat);
+      scene.add(points);
+
+      // ===== 마우스 (월드 좌표) =====
+      const mouseNdc = new THREE.Vector2(0,0);
+      const mouseWorld = new THREE.Vector3();
+      const plane = new THREE.Plane(new THREE.Vector3(0,0,1), 0);
+      const raycaster = new THREE.Raycaster();
+      function onPointer(e){
+        mouseNdc.x = (e.clientX / innerWidth) * 2 - 1;
+        mouseNdc.y = -(e.clientY / innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouseNdc, camera);
+        raycaster.ray.intersectPlane(plane, mouseWorld);
+      }
+      addEventListener('pointermove', onPointer);
+
+      function mouseOverText(){
+        const m = 0.02; const x = mouseWorld.x, y = mouseWorld.y;
+        return (x > textRect.x - m && x < textRect.x + textRect.w + m &&
+                y < textRect.y - m && y > textRect.y + textRect.h - m);
+      }
+
+      function claimTargetsAround(mx,my,count=CLAIM_BATCH){
+        const pool = [];
+        for (let i=0;i<textPoints.length;i+= (1+((i*16807)%5)) ){
+          const tp = textPoints[i];
+          const dx = tp.x - mx, dy = tp.y - my; const d2 = dx*dx + dy*dy;
+          if (d2 < REVEAL_RADIUS*REVEAL_RADIUS) pool.push({i, d2});
+        }
+        pool.sort((a,b)=>a.d2-b.d2);
+        return pool.slice(0, count).map(o=>o.i);
+      }
+
+      // ===== 공간 해시 (separation용) =====
+      const hash = new Map();
+      function key(ix,iy){ return (ix<<16) ^ iy; }
+      function ix(x){ return Math.floor(x/HASH_CELL); }
+      function iy(y){ return Math.floor(y/HASH_CELL); }
+
+      // ===== 애니메이션 루프 =====
+      let lastT = performance.now(); let frame=0;
+
+      function animate(){
+        requestAnimationFrame(animate);
+        const t  = performance.now()*0.001;
+        const dt = Math.min(0.033, (t - lastT)); lastT = t; frame++;
+
+        const pos = geom.attributes.position.array;
+        const vel = geom.attributes.velocity.array;
+        const tar = geom.attributes.target.array;
+
+        if (mouseOverText()){
+          const hits = claimTargetsAround(mouseWorld.x, mouseWorld.y, CLAIM_BATCH);
+          for (let h=0; h<hits.length; h+=3){
+            const idx = (Math.random()* (pos.length/3) | 0);
+            const tp = textPoints[hits[h]];
+            tar[idx*3+0] = tp.x; tar[idx*3+1] = tp.y; tar[idx*3+2] = 0;
+          }
+        }
+
+        hash.clear();
+        for (let i=0;i<pos.length;i+=3){
+          const x=pos[i], y=pos[i+1];
+          const k = key(ix(x), iy(y));
+          if (!hash.has(k)) hash.set(k, []);
+          hash.get(k).push(i/3);
+        }
+
+        const SEP_R2 = SEP_RADIUS*SEP_RADIUS;
+
+        for (let i=0;i<pos.length;i+=3){
+          let x=pos[i], y=pos[i+1], z=pos[i+2];
+          let vx=vel[i], vy=vel[i+1], vz=vel[i+2];
+
+          const fx = Math.sin((x+y)*1.2 + t*0.9) - Math.cos((x-y)*1.0 + t*1.1)*0.6;
+          const fy = Math.cos((x - y)*1.1 + t*0.8) + Math.sin((x+y)*1.3 + t*0.7)*0.6;
+          vx += fx * CURL_SCALE * dt; vy += fy * CURL_SCALE * dt;
+
+          vx += (mouseWorld.x - x) * MOUSE_PULL * dt;
+          vy += (mouseWorld.y - y) * MOUSE_PULL * dt;
+
+          const tx = tar[i], ty = tar[i+1];
+          if (tx !== 999){
+            vx += (tx - x) * SPRING * dt; vy += (ty - y) * SPRING * dt;
+            const dx=tx-x, dy=ty-y; if (dx*dx + dy*dy < UNCLAIM_DIST*UNCLAIM_DIST){
+              tar[i]=tar[i+1]=999; tar[i+2]=0;
+            }
+          }
+
+          if (frame % FLOCK_EVERY_N === 0){
+            let sx=0, sy=0; let cnt=0;
+            const cx = ix(x), cy = iy(y);
+            for (let oy=-1; oy<=1; oy++){
+              for (let ox=-1; ox<=1; ox++){
+                const arr = hash.get(key(cx+ox, cy+oy)); if (!arr) continue;
+                for (let k=0;k<arr.length;k++){
+                  const j = arr[k]*3; if (j===i) continue;
+                  const dx = x - pos[j], dy = y - pos[j+1];
+                  const d2 = dx*dx + dy*dy; if (d2>0.000001 && d2<SEP_R2){
+                    const inv = 1.0/Math.max(0.0001, d2);
+                    sx += dx*inv; sy += dy*inv; cnt++;
+                  }
+                }
+              }
+            }
+            if (cnt>0){ vx += (sx/cnt) * SEP_FORCE * dt; vy += (sy/cnt) * SEP_FORCE * dt; }
+          }
+
+          vx*=DAMP; vy*=DAMP; vz*=DAMP; const sp=Math.hypot(vx,vy,vz);
+          if (sp>MAX_SPD){ const s=MAX_SPD/sp; vx*=s; vy*=s; vz*=s; }
+
+          x += vx*dt; y += vy*dt; z += vz*dt*0.2;
+          const B=0.95; if (x<-0.62||x>0.62){ vx*=-B; x=Math.max(-0.62,Math.min(0.62,x)); }
+          if (y<-0.35||y>0.35){ vy*=-B; y=Math.max(-0.35,Math.min(0.35,y)); }
+
+          pos[i]=x; pos[i+1]=y; pos[i+2]=z; vel[i]=vx; vel[i+1]=vy; vel[i+2]=vz;
+        }
+
+        geom.attributes.position.needsUpdate = true;
+        geom.attributes.velocity.needsUpdate = true;
+        geom.attributes.target.needsUpdate   = true;
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+
+      addEventListener('resize', ()=>{
+        camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    })();
   </script>
 </body>
 </html>
-
