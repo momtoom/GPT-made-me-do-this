@@ -4,15 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Haiku Particles</title>
-  <!-- Host Grotesk 폰트 불러오기 -->
+
+  <!-- Google Fonts: Host Grotesk -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@500&display=swap" rel="stylesheet">
+
   <style>
     html,body{margin:0;height:100%;background:#0b0d10;}
-    canvas{display:block;width:100vw;height:100vh;}
+    body{font-family:'Host Grotesk',system-ui,-apple-system,sans-serif;}
+    canvas{display:block;width:100vw;height:100vh;touch-action:none;}
   </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
-  <script defer src="script.js"></script>
+  <script defer src="script.js?v=3"></script>
 </body>
 </html>
