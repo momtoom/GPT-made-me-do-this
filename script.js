@@ -1,52 +1,69 @@
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d', { alpha: true });
 
-const DPR = Math.min(2, window.devicePixelRatio || 1);
+let DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1)); // NEW: DPR 동적 반영
 let W = 0, H = 0;
 
-function fit() {
-  // CSS 픽셀 기준 표시 크기(최소 폭 1024 보장)
-  const cssW = Math.max(1024, window.innerWidth);
-  const cssH = window.innerHeight;
-
-  // 화면에 보이는 크기(스타일)도 명시
-  canvas.style.width  = cssW + 'px';
-  canvas.style.height = cssH + 'px';
-
-  // 실제 렌더링 해상도(DPR 반영)
-  W = Math.floor(cssW * DPR);
-  H = Math.floor(cssH * DPR);
-  canvas.width  = W;
-  canvas.height = H;
-}
-
+// ====== 폰트 세팅 ======
 const LINES = [
   "SPENT HOURS BACKFLOW",
   "SLOWLY RISING ROUND MY SKIN",
   "FOG DISSOLVES THE WALLS"
 ];
 
-// 폰트 지정: 굵기 + 크기 + 폰트명 순서 중요!
-const FONT_SIZE   = Math.round(42 * DPR);
-const FONT_FAMILY = '"Host Grotesk", sans-serif';
-const FONT_SPEC   = `500 ${FONT_SIZE}px ${FONT_FAMILY}`;
+const FONT_BASE = 100;                            // CHANGED: 보기 쉬운 배율 기준
+const FONT_SIZE = Math.round(FONT_BASE);          // CHANGED: 캔버스에선 scale로 DPR 처리
+const LINE_H    = Math.round(FONT_SIZE * 1.35);
+const FONT_FAMILY = "'Host Grotesk', sans-serif";
+const FONT_SPEC   = `500 ${FONT_SIZE}px ${FONT_FAMILY}`;   // 굵기 + 크기 + 폰트명
 
-const LINE_H = Math.round(FONT_SIZE * 1.35);
-const STEP   = Math.max(2, Math.round(3 * DPR));  // 샘플 간격 (2=촘촘, 4=빠름)
-const DOT    = Math.max(1, Math.round(1.1 * DPR)); // 점 크기
+const STEP = 3;                                   // 샘플 간격 (작을수록 촘촘)
+const DOT  = 1.2;                                 // 점 크기(캔버스 좌표계 기준)
 
 const particles = [];
-
 const mouse = { x: 0, y: 0, down: false };
+
+// ====== 포인터 ======
 function setPointer(e){
   const r = canvas.getBoundingClientRect();
-  mouse.x = (e.clientX - r.left) * DPR;
-  mouse.y = (e.clientY - r.top) * DPR;
+  mouse.x = e.clientX - r.left;                   // CHANGED: 스케일 이후 좌표계 = CSS 픽셀
+  mouse.y = e.clientY - r.top;
 }
 window.addEventListener('pointermove', setPointer);
 window.addEventListener('pointerdown', e => { mouse.down = true; setPointer(e); });
 window.addEventListener('pointerup',   () => { mouse.down = false; });
 
+// ====== 리사이즈 (핵심 변경) ======
+function resizeCanvas() {
+  // 1) CSS 픽셀 기준 화면 크기
+  const cssW = window.innerWidth;                 // CHANGED
+  const cssH = window.innerHeight;                // CHANGED
+
+  // 2) 렌더 타깃 해상도 (물리 픽셀)
+  DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1)); // NEW
+  canvas.width  = Math.floor(cssW * DPR);         // CHANGED
+  canvas.height = Math.floor(cssH * DPR);         // CHANGED
+
+  // 3) 표시 크기 (CSS)
+  canvas.style.width  = cssW + 'px';              // NEW
+  canvas.style.height = cssH + 'px';              // NEW
+
+  // 4) 컨텍스트 스케일 (DPR 보정)
+  ctx.setTransform(1, 0, 0, 1, 0, 0);             // CHANGED: 이전 스케일 초기화
+  ctx.scale(DPR, DPR);                            // CHANGED: 이후 모든 그리기/좌표는 CSS 픽셀 기준
+
+  // 내부 계산도 CSS 좌표계로
+  W = cssW;                                       // CHANGED
+  H = cssH;                                       // CHANGED
+}
+
+// ====== 폰트 로드 보장 ======
+async function waitFont() {
+  try { await document.fonts.load(FONT_SPEC, "A"); } catch {}
+  try { await document.fonts.ready; } catch {}
+}
+
+// ====== 도우미 ======
 function measureMaxLineWidth() {
   ctx.font = FONT_SPEC;
   let max = 0;
@@ -54,29 +71,23 @@ function measureMaxLineWidth() {
   return max;
 }
 
-// 폰트가 실제로 로드될 때까지 기다림 (중요!)
-async function waitFont() {
-  try { await document.fonts.load(FONT_SPEC, "A"); } catch {}
-  try { await document.fonts.ready; } catch {}
-}
-
+// ====== 파티클 생성 (텍스트 샘플링) ======
 async function buildParticles() {
   particles.length = 0;
 
-  // 텍스트를 메인 캔버스에 잠깐 찍어 샘플링 → 곧바로 지움
   ctx.clearRect(0,0,W,H);
   ctx.font = FONT_SPEC;
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
   ctx.fillStyle = '#fff';
 
-  // 중앙 기준 좌측 정렬 앵커 계산
-  const totalH  = LINES.length * LINE_H;
-  const startY  = (H / 2) - (totalH / 2);
+  // 중앙 기준 좌측 정렬 앵커
+  const totalH = LINES.length * LINE_H;
+  const startY = (H / 2) - (totalH / 2);
   const maxLine = measureMaxLineWidth();
   const baseX   = (W / 2) - (maxLine / 2);
 
-  // 텍스트 찍기
+  // 텍스트 찍기 (메인 캔버스에 잠깐 찍고 샘플링 후 지움)
   LINES.forEach((t,i)=> ctx.fillText(t, baseX, startY + i*LINE_H));
 
   // 텍스트 영역만 샘플링
@@ -88,7 +99,7 @@ async function buildParticles() {
   const img = ctx.getImageData(minX, minY, maxX - minX, maxY - minY);
   const data = img.data, iw = img.width;
 
-  // 텍스트 지우고 파티클만 그릴 준비
+  // 텍스트 지우기
   ctx.clearRect(0,0,W,H);
 
   for (let y = 0; y < img.height; y += STEP) {
@@ -108,13 +119,14 @@ async function buildParticles() {
   }
 }
 
+// ====== 루프 ======
 function loop() {
   // 배경 잔상
   ctx.fillStyle = 'rgba(11,13,16,0.18)';
   ctx.fillRect(0,0,W,H);
 
   for (const p of particles) {
-    const dx = p.x - mouse.x;
+    const dx = p.x - mouse.x;                     // CHANGED: 좌표계가 CSS 기준
     const dy = p.y - mouse.y;
     const d2 = dx*dx + dy*dy + 0.0001;
     const f  = (mouse.down ? 2500 : 900) / d2;
@@ -122,7 +134,7 @@ function loop() {
     p.vx += (dx/Math.sqrt(d2)) * f;
     p.vy += (dy/Math.sqrt(d2)) * f;
 
-    // 원위치(ox, oy)로 끌어당기는 스프링
+    // 복귀 스프링
     p.vx += (p.ox - p.x) * 0.03;
     p.vy += (p.oy - p.y) * 0.03;
 
@@ -134,24 +146,26 @@ function loop() {
     p.y += p.vy;
 
     ctx.fillStyle = '#fff';
-    ctx.fillRect(p.x, p.y, DOT, DOT);
+    ctx.fillRect(p.x, p.y, DOT, DOT);             // CHANGED: DOT은 CSS 좌표계 기준
   }
 
   requestAnimationFrame(loop);
 }
 
-// 리사이즈 시: 사이즈 맞추고, 잠깐 쉬었다가 입자 재생성(과도한 호출 방지)
+// ====== 리사이즈 디바운스 ======
 let resizeTimer = null;
 window.addEventListener('resize', () => {
-  fit();
+  resizeCanvas();                                  // NEW: 즉시 사이즈 반영
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { buildParticles(); }, 120);
+  resizeTimer = setTimeout(() => {
+    buildParticles();                              // NEW: 새 크기에 맞춰 재샘플링
+  }, 120);
 });
 
-// 최초 실행
-(async function ready() {
-  await waitFont();   // 폰트 로드 보장
-  fit();              // 사이즈 세팅 (최소 1024, 중앙 배치)
+// ====== 부팅 순서 ======
+(async function ready(){
+  await waitFont();                                // NEW: 폰트 로드 보장
+  resizeCanvas();                                  // CHANGED: 풀창 + DPR 스케일
   await buildParticles();
   loop();
 })();
