@@ -11,33 +11,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@500&display=swap" rel="stylesheet">
 
   <style>
-    html, body {
-      margin: 0;
-      height: 100%;
-      background: #0b0d10;
-    }
-    /* 화면을 액자처럼 만들고, 그 안에서 캔버스를 정중앙에 둠 */
-    body {
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;   /* 가로 중앙 */
-      align-items: center;       /* 세로 중앙 */
-      overflow: hidden;          /* 1024px보다 좁을 때 좌우 넘침 숨김 */
-      font-family: 'Host Grotesk', system-ui, -apple-system, sans-serif;
-      touch-action: none;
-    }
-    /* 최소 폭 1024px, 그 이상은 화면 너비에 맞춤; 높이는 화면 꽉 채움 */
-    canvas {
-      display: block;
-      min-width: 1024px;
-      width: 100vw;
-      height: 100vh;
-    }
+    html,body{margin:0;height:100%;background:#0b0d10;}
+    body{height:100vh}
+    canvas{display:block;width:100vw;height:100vh;touch-action:none;}
   </style>
 </head>
 <body>
   <canvas id="stage"></canvas>
-  <!-- 캐시 무력화용 쿼리 파라미터 버전 숫자 올리기 -->
-  <script defer src="script.js?v=9"></script>
+  <!-- 캐시 무력화 위해 숫자 올려서 불러오기 -->
+  <script defer src="script.js?v=12"></script>
 </body>
 </html>
