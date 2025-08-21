@@ -71,21 +71,21 @@
 
       const GRID_STEP = 2;                 // 글자 해상도
       const DOT_SIZE  = 0.028;             // 적은 입자라도 또렷하게
-      const SWARM_DENSITY = 1000;           // 화면당 입자 수 ↓
+      const SWARM_DENSITY = 5000;           // 화면당 입자 수 ↓
       const EXTRA_PARTICLE_MULT = 1.5;    // 1.1 → 1.02 : 텍스트 대비 여분 축소(과밀 방지)
       
-      const CURL_SCALE = 0.42;             // 0.65 → 0.42 : 흐름장 세기 낮춤(요동 완화)
-      const DAMP = 0.975;                  // 0.965 → 0.975 : 감쇠 강화로 미세 떨림 제거
-      const MAX_SPD = 1.3;                 // 1.9 → 1.3 : 최대 속도 제한
-      const MOUSE_PULL = 0.45;             // 0.55 → 0.45 : 마우스 흡인 약화(아래 거리감쇠랑 함께 적용)
+      const CURL_SCALE = 0.2;             // 0.65 → 0.42 : 흐름장 세기 낮춤(요동 완화)
+      const DAMP = 0.995;                  // 0.965 → 0.975 : 감쇠 강화로 미세 떨림 제거
+      const MAX_SPD = 1.1;                 // 1.9 → 1.3 : 최대 속도 제한
+      const MOUSE_PULL = 0.85;             // 0.55 → 0.45 : 마우스 흡인 약화(아래 거리감쇠랑 함께 적용)
       
-      const REVEAL_SPRING = 6.8;           // (소폭 ↑) 글자 모일 때 더 안정적으로
+      const REVEAL_SPRING = 10;           // (소폭 ↑) 글자 모일 때 더 안정적으로
       const UNCLAIM_DIST  = 0.012;
       const SEP_RADIUS = 0.035;
-      const SEP_FORCE  = 0.8;              // 0.85 → 0.8 : 과도한 분리력 약간 완화
+      const SEP_FORCE  = 0.4;              // 0.85 → 0.8 : 과도한 분리력 약간 완화
       const HASH_CELL  = 0.06;
       
-      const Z_RANGE = 0.6;                 // 0.75 → 0.6 : 깊이 범위 살짝 축소(원근 노이즈 감소)
+      const Z_RANGE = 1;                 // 0.75 → 0.6 : 깊이 범위 살짝 축소(원근 노이즈 감소)
       const SCENE_SLOW_SPIN = 0.04;        // 0.07 → 0.04 : 장면 회전 느리게(시각적 안정감)
 
       // ===== Scene =====
