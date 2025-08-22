@@ -20,6 +20,8 @@
   <div id="hint">SPACE: 전체 결집/해산 · 마우스/터치: 글자 위에서 윤곽 드러남</div>
 
   <script type="module">
+    import * as THREE from './lib/three.module.js';
+    import { OrbitControls } from './lib/OrbitControls.js';
     const dbg = document.getElementById('debug');
     const log = (s)=>{ if(dbg) dbg.textContent = s; };
     async function tryImport(url){ try{ const m=await import(url); log('loaded: '+url); return m; }catch(e){ log('failed: '+url); return null; } }
