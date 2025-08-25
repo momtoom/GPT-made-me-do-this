@@ -111,8 +111,8 @@
             const nx = (x/W) * 2 - 1;      // NDC
             const ny = (y/H) * 2 - 1;
             // FOV/Aspect 반영한 월드 좌표 (z=0 평면)
-            const wx = nx * halfX;
-            const wy = -ny * halfY;
+            const wx = nx * 1.6;   // 가로 스케일
+            const wy = -ny * 0.8;  // 세로 스케일 (필요하면 0.9~1.2로 조정)
             pts.push({ x: wx, y: wy });
             if (wx<minX) minX=wx; if (wx>maxX) maxX=wx;
             if (wy<minY) minY=wy; if (wy>maxY) maxY=wy;
