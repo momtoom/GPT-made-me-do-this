@@ -104,18 +104,23 @@
       const pts = [];
       let minX= Infinity, maxX=-Infinity, minY= Infinity, maxY=-Infinity;
 
-      for (let y=0; y<H; y+=GRID_STEP){
-        for (let x=0; x<W; x+=GRID_STEP){
-          const a = img[(y*W+x)*4 + 3];
-          if (a > 140){
-            const nx = (x/W) * 2 - 1;      // NDC
-            const ny = (y/H) * 2 - 1;
-            // FOV/Aspect 반영한 월드 좌표 (z=0 평면)
-            const wx = nx * 1.6;   // 가로 스케일
-            const wy = -ny * 0.8;  // 세로 스케일 (필요하면 0.9~1.2로 조정)
+      const halfY = Math.tan(THREE.MathUtils.degToRad(camera.fov) * 0.5) * camera.position.z;
+      const halfX = halfY * camera.aspect;
+      const scale = 0.9;
+
+      for (let y = 0; y < H; y += GRID_STEP) {
+        for (let x = 0; x < W; x += GRID_STEP) {
+          const a = img[(y * W + x) * 4 + 3];
+          if (a > 140) {
+            const nx = (x / W - 0.5);   // -0.5..+0.5
+            const ny = (y / H - 0.5);
+            const wx = nx * 2 * halfX * scale;
+            const wy = -ny * 2 * halfY * scale;
+      
             pts.push({ x: wx, y: wy });
-            if (wx<minX) minX=wx; if (wx>maxX) maxX=wx;
-            if (wy<minY) minY=wy; if (wy>maxY) maxY=wy;
+      
+            if (wx < minX) minX = wx; if (wx > maxX) maxX = wx;
+            if (wy < minY) minY = wy; if (wy > maxY) maxY = wy;
           }
         }
       }
