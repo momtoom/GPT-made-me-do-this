@@ -3,21 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Vibe Murmuration 3D — Crisp Letter Reveal</title>
+  <title>Vibe Murmuration 3D — Letter Debug Build</title>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@600&display=swap" rel="stylesheet">
   <style>
     html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden}
     #app{position:fixed;inset:0}
     #debug{position:fixed;left:12px;bottom:12px;color:#8fa;opacity:.9;font:12px/1.2 ui-monospace,monospace;white-space:pre}
-    #hint{position:fixed;left:12px;top:12px;color:#89a;opacity:.8;font:12px/1.2 ui-monospace,monospace}
-    canvas { touch-action: none; }
+    #hint{position:fixed;left:12px;top:12px;color:#89a;opacity:.85;font:12px/1.2 ui-monospace,monospace}
+    canvas{touch-action:none}
   </style>
 </head>
 <body>
   <div id="app"></div>
   <div id="debug"></div>
-  <div id="hint">SPACE: 전체 결집/해산 · A: 텍스트 전체 결집 토글 · 마우스/터치: 글자 위에서 윤곽 드러남</div>
+  <div id="hint">SPACE: 전체 결집/해산 · 마우스/터치: 글자 위에서 윤곽 드러남</div>
 
   <script type="module">
     import * as THREE from './lib/three.module.js';
@@ -26,51 +26,39 @@
     const dbg = document.getElementById('debug');
     const log = (s)=>{ if(dbg) dbg.textContent = s; };
 
-    // ===== Parameters (글자 선명도 개선) =====
+    // ---------- 파라미터 (디버그에 유리하게 조정) ----------
     const TEXT_LINES = [
       'SPENT HOURS BACKFLOW',
       'SLOWLY RISING ROUND MY SKIN',
       'FOG DISSOLVES THE WALLS'
     ];
     const FONT_FAMILY = "'Host Grotesk', sans-serif";
+    const GRID_STEP = 1.6;      // 글자 포인트 촘촘도
+    const SWARM_DENSITY = 260;  // 화면 크기에 따른 입자 수
+    const MAX_PARTICLES = 15000;
 
-    const GRID_STEP=1.6;           // ↓ 촘촘한 글자 점
-    const MAX_PARTICLES=15000;
-    const SWARM_DENSITY=260;       // 화면당 입자 수 상향
-    const TEXT_MAP_RATIO=1.0;      // 텍스트 점 100% 사용
+    const DOT_SIZE_BASE = 0.018;     // 점 크기 키움 (안 보임 방지)
+    const DAMP = 0.985, MAX_SPD = 1.25;
+    const MOUSE_PULL = 0.65;
+    const SPRING_TEXT = 14.0;        // 타깃 스프링 강도
+    const RELEASE_DELAY = 450;
 
-    const DOT_SIZE_BASE = 0.016;   // 점 조금 키움
-    const CURL_SCALE_FREE=0.30;    // 자유 입자만 소용돌이
-    const CURL_SCALE_LOCK=0.06;    // 타깃 가진 입자는 약하게
-    const DAMP=0.985;
-    const MAX_SPD=1.25;
-    const MOUSE_PULL=0.65;
+    const REVEAL_RADIUS = 0.22;
+    const CLAIM_BATCH = 900;
+    const PARTICLE_CLAIM_RADIUS = 0.22;
+    const UNCLAIM_DIST = 0.06;
 
-    const SPRING_TEXT=14.0;        // 텍스트 타깃 스프링 강함
-    const SPRING_ASSEMBLE=6.0;     // 전체 결집 시 스프링
-    const RELEASE_DELAY=450;
-
-    const HASH_CELL=0.08;
-    const Z_RANGE=0.7;
-    const SCENE_SLOW_SPIN=0.03;
-
-    const REVEAL_RADIUS=0.22;          // 마우스 주변 텍스트 점 선택 반경
-    const CLAIM_BATCH=900;              // 프레임당 할당 수
-    const PARTICLE_CLAIM_RADIUS=0.22;   // 파티클-텍스트 매칭 반경
-    const UNCLAIM_DIST=0.06;            // 너무 멀어지면 타깃 해제
-
-    // ===== Scene =====
+    // ---------- 씬 ----------
     const el = document.getElementById('app');
     const scene = new THREE.Scene();
 
-    const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.01, 30);
-    camera.position.set(0,0,1.7);
+    const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 30);
+    camera.position.set(0, 0, 1.7);
 
     const renderer = new THREE.WebGLRenderer({ antialias:false, alpha:false, powerPreference:'high-performance' });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 1.6));
     renderer.setSize(innerWidth, innerHeight);
     el.appendChild(renderer.domElement);
-    renderer.domElement.style.touchAction = 'none';
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
@@ -79,18 +67,11 @@
 
     scene.fog = new THREE.FogExp2(0x0b0d10, 0.18);
 
-    // ===== Bounds =====
-    const bounds = {};
-    function computeBounds(){
-      const halfY = Math.tan(THREE.MathUtils.degToRad(camera.fov)*0.5)*camera.position.z;
-      const halfX = halfY*camera.aspect;
-      bounds.minX=-halfX-0.04; bounds.maxX=halfX+0.04;
-      bounds.minY=-halfY-0.04; bounds.maxY=halfY+0.04;
-    }
-    computeBounds();
+    // ---------- 글자 샘플링 (여기 위치에 둔다) ----------
+    async function makeTextPoints(){
+      // 폰트 로드 완료 대기 (중요!)
+      await document.fonts.ready;
 
-    // ===== Text point sampling =====
-    function makeTextPoints(){
       const W = 1200, H = 520;
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
@@ -101,6 +82,7 @@
       ctx.font = `600 66px ${FONT_FAMILY}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+
       const lineH = 96;
       const baseY = H/2 - lineH;
       TEXT_LINES.forEach((t,i)=> ctx.fillText(t, W/2, baseY + i*lineH));
@@ -110,26 +92,15 @@
       const pts = [];
       let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
 
-      const halfY = Math.tan(THREE.MathUtils.degToRad(camera.fov)*0.5)*camera.position.z;
-      const halfX = halfY*camera.aspect;
-
-      // 외곽선 위주로 좀 더 촘촘하게: 간단한 에지 가중(알파 변화량)
-      function alphaAt(x,y){ return img[(y*W + x)*4 + 3]||0; }
-
+      // ★ 디버그 단계: NDC 기반 "단순 좌표" 매핑으로 글자 모양부터 보이게 한다
       for(let y=0; y<H; y+=step){
         for(let x=0; x<W; x+=step){
-          const a = alphaAt(x,y);
+          const a = img[(y*W+x)*4 + 3];
           if(a>140){
-            const aR = alphaAt(Math.min(W-1,x+step), y);
-            const aD = alphaAt(x, Math.min(H-1,y+step));
-            const edge = Math.abs(a - aR) + Math.abs(a - aD);
-            const keep = edge>40 ? 1 : (Math.random()<0.5 ? 1:0); // 외곽 우선
-            if(!keep) continue;
-
-            const nx = (x/W)*2-1;
-            const ny = (y/H)*2-1;
-            const wx = nx * halfX;
-            const wy = -ny * halfY;
+            const nx = (x/W)*2 - 1;      // -1..+1
+            const ny = (y/H)*2 - 1;      // -1..+1
+            const wx = nx * 0.9;         // 화면에 잘 들어오게 스케일
+            const wy = -ny * 0.5;        // 세로 압축(필요시 0.9로)
             pts.push({x:wx, y:wy});
             if(wx<minX)minX=wx; if(wx>maxX)maxX=wx;
             if(wy<minY)minY=wy; if(wy>maxY)maxY=wy;
@@ -140,324 +111,240 @@
       return { pts, rect };
     }
 
-    let { pts:textPoints, rect:textRect } = makeTextPoints();
-    // 텍스트 타깃(전부 사용)
-    const textTargets = textPoints.slice(0);
-    const nTargets = textTargets.length;
+    // ---------- 텍스트 포인트 생성 및 확인 ----------
+    let textPoints = [], textRect = null;
+    let textTargets = [], nTargets = 0;
 
-    // 해시(필요 시 근처 점 찾기)
-    const textHash = new Map();
-    const T_HASH = HASH_CELL*0.8;
-    function buildTextHash(){
-      textHash.clear();
-      for(let i=0;i<nTargets;i++){
-        const p = textTargets[i];
-        const key = ((Math.floor((p.x-bounds.minX)/T_HASH))<<16) ^ Math.floor((p.y-bounds.minY)/T_HASH);
-        if(!textHash.has(key)) textHash.set(key,[]);
-        textHash.get(key).push(i);
+    // 파티클/타깃 버퍼
+    let particleCount, geom, positions, velocities, targets, targetIdx, ptOwner, DOT_SIZE;
+
+    // ---------- 초기화 전체를 한 번에 ----------
+    (async function init(){
+      const res = await makeTextPoints();
+      textPoints = res.pts; textRect = res.rect;
+      textTargets = textPoints.slice(0);
+      nTargets = textTargets.length;
+
+      // 디버그 출력
+      console.log('textPoints length =', nTargets);
+      dbg.textContent = `textPoints=${nTargets}`;
+
+      // 포인트가 0이면 폰트 문제 가능 → 시스템 폰트로 재시도 안내
+      if(nTargets === 0){
+        const warn = 'Warning: textPoints=0 (폰트 로드/렌더 문제 가능). ctx.font를 "bold 66px Arial"로 바꿔 테스트해봐.';
+        console.warn(warn);
       }
-    }
-    buildTextHash();
 
-    // ===== Particles =====
-    let particleCount = Math.min(MAX_PARTICLES, Math.floor((innerWidth*innerHeight)/SWARM_DENSITY));
-    particleCount = Math.max(Math.min(nTargets*1.3|0, MAX_PARTICLES), 1800); // 텍스트 점 개수 기준으로 상향
+      // 파티클 준비
+      particleCount = Math.min(MAX_PARTICLES, Math.floor((innerWidth*innerHeight)/SWARM_DENSITY));
+      particleCount = Math.max(Math.min(nTargets*1.3|0, MAX_PARTICLES), 1800);
 
-    const DOT_SIZE = Math.max(DOT_SIZE_BASE, Math.min(0.024, DOT_SIZE_BASE * (800/Math.max(innerWidth, innerHeight)) * 1.6));
+      DOT_SIZE = Math.max(DOT_SIZE_BASE, Math.min(0.024, DOT_SIZE_BASE * (800/Math.max(innerWidth, innerHeight)) * 1.6));
 
-    const geom = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount*3);
-    const velocities = new Float32Array(particleCount*3);
-    const targets   = new Float32Array(particleCount*3);
-    const targetIdx = new Int32Array(particleCount);   // 파티클이 붙은 텍스트 인덱스(-1=없음)
-    const ptOwner   = new Int32Array(nTargets);        // 텍스트 인덱스를 소유한 파티클(-1=없음)
+      geom = new THREE.BufferGeometry();
+      positions = new Float32Array(particleCount*3);
+      velocities = new Float32Array(particleCount*3);
+      targets   = new Float32Array(particleCount*3);
+      targetIdx = new Int32Array(particleCount);
+      ptOwner   = new Int32Array(nTargets);
 
-    function attachBuffers(){
       geom.setAttribute('position', new THREE.BufferAttribute(positions,3));
       geom.setAttribute('velocity', new THREE.BufferAttribute(velocities,3));
       geom.setAttribute('target',   new THREE.BufferAttribute(targets,3));
-    }
-    attachBuffers();
 
-    const mat = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: DOT_SIZE,
-      sizeAttenuation: true,
-      transparent: true,
-      opacity: 0.92,
-      depthWrite: false
-    });
-    const points = new THREE.Points(geom, mat);
-    scene.add(points);
+      const mat = new THREE.PointsMaterial({
+        color:0xffffff, size:DOT_SIZE, sizeAttenuation:true, transparent:true, opacity:0.92, depthWrite:false
+      });
+      const points = new THREE.Points(geom, mat);
+      scene.add(points);
 
-    function initParticles(){
+      // 경계
+      const bounds = {};
+      function computeBounds(){
+        const halfY = Math.tan(THREE.MathUtils.degToRad(camera.fov)*0.5)*camera.position.z;
+        const halfX = halfY*camera.aspect;
+        bounds.minX=-halfX-0.04; bounds.maxX=halfX+0.04;
+        bounds.minY=-halfY-0.04; bounds.maxY=halfY+0.04;
+      }
+      computeBounds();
+
+      // 초기화
       for(let i=0;i<particleCount;i++){
         positions[i*3]   = THREE.MathUtils.lerp(bounds.minX,bounds.maxX,Math.random());
         positions[i*3+1] = THREE.MathUtils.lerp(bounds.minY,bounds.maxY,Math.random());
-        positions[i*3+2] = (Math.random()*2-1)*Z_RANGE;
+        positions[i*3+2] = (Math.random()*2-1)*0.7;
 
         velocities[i*3]   = (Math.random()-0.5)*0.25;
         velocities[i*3+1] = (Math.random()-0.5)*0.25;
         velocities[i*3+2] = (Math.random()-0.5)*0.07;
 
-        targets[i*3] = 999; targets[i*3+1] = 999; targets[i*3+2] = 0;
-        targetIdx[i] = -1;
+        targets[i*3]=999; targets[i*3+1]=999; targets[i*3+2]=0;
+        targetIdx[i]=-1;
       }
       for(let t=0;t<nTargets;t++) ptOwner[t] = -1;
 
-      geom.attributes.position.needsUpdate = true;
-      geom.attributes.velocity.needsUpdate = true;
-      geom.attributes.target.needsUpdate   = true;
-    }
-    initParticles();
+      // 입력
+      const mouseNdc=new THREE.Vector2(), mouseWorld=new THREE.Vector3(), mouseLocal=new THREE.Vector3();
+      const plane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
+      const raycaster=new THREE.Raycaster();
 
-    // ===== Input =====
-    const mouseNdc=new THREE.Vector2(), mouseWorld=new THREE.Vector3(), mouseLocal=new THREE.Vector3();
-    const plane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
-    const raycaster=new THREE.Raycaster();
+      let mouseActive=false, touchMode=false, lastOnTextMs=0, assembleAll=false;
 
-    let mouseActive=false, touchMode=false, lastOnTextMs=0, assembleAll=false;
-
-    function setFromClient(x,y){
-      mouseNdc.x = (x/innerWidth)*2-1;
-      mouseNdc.y = -(y/innerHeight)*2+1;
-      raycaster.setFromCamera(mouseNdc, camera);
-      raycaster.ray.intersectPlane(plane, mouseWorld);
-      mouseLocal.copy(mouseWorld);
-      points.worldToLocal(mouseLocal);
-      mouseActive = true;
-    }
-    function onPointer(e){ setFromClient(e.clientX, e.clientY); }
-    addEventListener('pointermove', onPointer, {passive:true});
-    addEventListener('pointerdown', onPointer, {passive:true});
-
-    renderer.domElement.addEventListener('touchstart', e=>{
-      if(!e.touches.length) return;
-      touchMode = true; controls.enabled = false;
-      setFromClient(e.touches[0].clientX, e.touches[0].clientY);
-      e.preventDefault();
-    }, {passive:false});
-    renderer.domElement.addEventListener('touchmove', e=>{
-      if(!e.touches.length) return;
-      setFromClient(e.touches[0].clientX, e.touches[0].clientY);
-      e.preventDefault();
-    }, {passive:false});
-    renderer.domElement.addEventListener('touchend', ()=>{
-      touchMode=false; controls.enabled=true;
-      setTimeout(()=>{ if(!assembleAll) releaseTextAll(); }, RELEASE_DELAY);
-    }, {passive:true});
-
-    addEventListener('resize', ()=>{
-      camera.aspect = innerWidth/innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth,innerHeight);
-      computeBounds();
-    });
-
-    addEventListener('keydown', (e)=>{
-      if(e.code==='Space'){
-        assembleAll = !assembleAll;
-        if(!assembleAll) releaseTextAll();
+      function setFromClient(x,y){
+        mouseNdc.x = (x/innerWidth)*2-1;
+        mouseNdc.y = -(y/innerHeight)*2+1;
+        raycaster.setFromCamera(mouseNdc, camera);
+        raycaster.ray.intersectPlane(plane, mouseWorld);
+        mouseLocal.copy(mouseWorld);
+        points.worldToLocal(mouseLocal);
+        mouseActive = true;
       }
-      if(e.code==='KeyA'){
-        assembleAll = !assembleAll;
-        if(!assembleAll) releaseTextAll();
-      }
-    });
+      function onPointer(e){ setFromClient(e.clientX, e.clientY); }
+      addEventListener('pointermove', onPointer, {passive:true});
+      addEventListener('pointerdown', onPointer, {passive:true});
 
-    function mouseOverText(){
-      const m=0.02;
-      const x=mouseLocal.x, y=mouseLocal.y;
-      return (x>textRect.x-m && x<textRect.x+textRect.w+m && y<textRect.y-m && y>textRect.y+textRect.h-m);
-    }
+      renderer.domElement.addEventListener('touchstart', e=>{
+        if(!e.touches.length) return;
+        touchMode = true; controls.enabled = false;
+        setFromClient(e.touches[0].clientX, e.touches[0].clientY);
+        e.preventDefault();
+      }, {passive:false});
+      renderer.domElement.addEventListener('touchmove', e=>{
+        if(!e.touches.length) return;
+        setFromClient(e.touches[0].clientX, e.touches[0].clientY);
+        e.preventDefault();
+      }, {passive:false});
+      renderer.domElement.addEventListener('touchend', ()=>{
+        touchMode=false; controls.enabled=true;
+        setTimeout(()=>{ if(!assembleAll) releaseTextAll(); }, RELEASE_DELAY);
+      }, {passive:true});
 
-    // ===== Claim / Release (1:1 매칭) =====
-    function releaseTextAll(){
-      for(let i=0;i<particleCount;i++){
-        targets[i*3]=999; targets[i*3+1]=999; targetIdx[i]=-1;
-      }
-      for(let t=0;t<nTargets;t++) ptOwner[t]=-1;
-    }
+      addEventListener('resize', ()=>{
+        camera.aspect = innerWidth/innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth,innerHeight);
+        computeBounds();
+      });
 
-    function forEachNearbyTargets(cx,cy,radius,fn){
-      const r = radius;
-      const minX = Math.floor((cx - r - bounds.minX)/T_HASH);
-      const maxX = Math.floor((cx + r - bounds.minX)/T_HASH);
-      const minY = Math.floor((cy - r - bounds.minY)/T_HASH);
-      const maxY = Math.floor((cy + r - bounds.minY)/T_HASH);
-      const r2 = r*r;
-      for(let gx=minX; gx<=maxX; gx++){
-        for(let gy=minY; gy<=maxY; gy++){
-          const key = (gx<<16) ^ gy;
-          const arr = textHash.get(key);
-          if(!arr) continue;
-          for(let k=0;k<arr.length;k++){
-            const ti = arr[k];
-            const tp = textTargets[ti];
-            const dx = tp.x - cx, dy = tp.y - cy;
-            if(dx*dx + dy*dy <= r2) fn(ti,tp);
-          }
-        }
-      }
-    }
-
-    function claimAround(cx,cy,maxClaims,matchRadius){
-      const pr2 = matchRadius*matchRadius;
-      let claimed = 0;
-      forEachNearbyTargets(cx,cy, matchRadius*1.35, (ti,tp)=>{
-        if(claimed >= maxClaims) return;
-        if(ptOwner[ti] !== -1) return; // 이미 점령된 텍스트 포인트
-
-        // 근처 "비할당" 파티클 중 최단거리 찾기
-        let best=-1, bestd=1e9;
-        for(let i=0;i<particleCount;i++){
-          if(targetIdx[i] !== -1) continue; // 이미 타깃 있음
-          const px=positions[i*3], py=positions[i*3+1];
-          const dx=px - tp.x, dy=py - tp.y;
-          const d=dx*dx + dy*dy;
-          if(d<bestd && d<=pr2){ best=i; bestd=d; }
-        }
-        if(best>=0){
-          targetIdx[best] = ti;
-          ptOwner[ti] = best;
-          targets[best*3]   = tp.x;
-          targets[best*3+1] = tp.y;
-          targets[best*3+2] = 0;
-          claimed++;
+      addEventListener('keydown', (e)=>{
+        if(e.code==='Space'){
+          assembleAll = !assembleAll;
+          if(!assembleAll) releaseTextAll();
         }
       });
-      return claimed;
-    }
 
-    function unclaimFarOnes(){
-      for(let i=0;i<particleCount;i++){
-        const ti = targetIdx[i];
-        if(ti < 0) continue;
-        const tp = textTargets[ti];
-        const px=positions[i*3], py=positions[i*3+1];
-        const dx=px - tp.x, dy=py - tp.y;
-        if(dx*dx + dy*dy > UNCLAIM_DIST*UNCLAIM_DIST){
-          // 해제
-          targetIdx[i]=-1;
-          ptOwner[ti]=-1;
-          targets[i*3]=999; targets[i*3+1]=999;
-        }
+      function mouseOverText(){
+        const m=0.02;
+        const x=mouseLocal.x, y=mouseLocal.y;
+        return (x>textRect.x-m && x<textRect.x+textRect.w+m && y<textRect.y-m && y>textRect.y+textRect.h-m);
       }
-    }
 
-    // 전체 결집(스냅) - 텍스트 전체를 가능한 만큼 채움
-    function assembleAllNow(){
-      // 이미 차있는 건 유지, 빈 텍스트 점을 가까운 파티클로 채우기
-      const pr = 0.35;
-      const pr2 = pr*pr;
-      // 간단: 텍스트 점을 순회하며 가장 가까운 비할당 파티클을 붙임
-      for(let ti=0; ti<nTargets; ti++){
-        if(ptOwner[ti] !== -1) continue;
-        const tp = textTargets[ti];
-        let best=-1, bestd=1e9;
+      function releaseTextAll(){
         for(let i=0;i<particleCount;i++){
-          if(targetIdx[i] !== -1) continue;
-          const px=positions[i*3], py=positions[i*3+1];
-          const dx=px - tp.x, dy=py - tp.y;
-          const d=dx*dx + dy*dy;
-          if(d < bestd && d <= pr2){ best=i; bestd=d; }
+          targets[i*3]=999; targets[i*3+1]=999; targetIdx[i]=-1;
         }
-        if(best>=0){
-          targetIdx[best]=ti; ptOwner[ti]=best;
-          targets[best*3]=tp.x; targets[best*3+1]=tp.y; targets[best*3+2]=0;
-        }
-      }
-    }
-
-    // ===== Loop =====
-    let tick=0, lastAssembleApply=0;
-    function animate(){
-      requestAnimationFrame(animate);
-      tick++;
-
-      // 시야 회전 살짝
-      scene.rotation.z += SCENE_SLOW_SPIN * 0.0012;
-
-      // 마우스/터치 리빌
-      if(mouseActive && mouseOverText()){
-        const rr = touchMode ? REVEAL_RADIUS*1.25 : REVEAL_RADIUS;
-        const pr = touchMode ? PARTICLE_CLAIM_RADIUS*1.25 : PARTICLE_CLAIM_RADIUS;
-        const batch = touchMode ? Math.round(CLAIM_BATCH*1.2) : CLAIM_BATCH;
-        const got = claimAround(mouseLocal.x, mouseLocal.y, batch, rr);
-        if(got>0) lastOnTextMs = performance.now();
-      }else{
-        if(performance.now() - lastOnTextMs > RELEASE_DELAY && !assembleAll){
-          // 근처에서 멀어지면 천천히 해제
-          unclaimFarOnes();
-        }
+        for(let t=0;t<nTargets;t++) ptOwner[t]=-1;
       }
 
-      // 전체 결집 모드 유지(주기적으로 빈자리 채움)
-      if(assembleAll && tick - lastAssembleApply > 10){
-        assembleAllNow();
-        lastAssembleApply = tick;
+      function claimAround(cx,cy,maxClaims,matchRadius){
+        // 텍스트 포인트 중 가까운 것부터 파티클에 1:1 할당
+        let claimed=0;
+        const r2 = matchRadius*matchRadius;
+        for(let t=0; t<nTargets && claimed<maxClaims; t++){
+          if(ptOwner[t] !== -1) continue;
+          const tp = textTargets[t];
+          const dx0 = tp.x - cx, dy0 = tp.y - cy;
+          if(dx0*dx0 + dy0*dy0 > r2) continue;
+
+          let best=-1, bestd=1e9;
+          for(let i=0;i<particleCount;i++){
+            if(targetIdx[i] !== -1) continue;
+            const px=positions[i*3], py=positions[i*3+1];
+            const dx=px - tp.x, dy=py - tp.y;
+            const d=dx*dx + dy*dy;
+            if(d<bestd && d<=r2){ best=i; bestd=d; }
+          }
+          if(best>=0){
+            targetIdx[best]=t; ptOwner[t]=best;
+            targets[best*3]=tp.x; targets[best*3+1]=tp.y; targets[best*3+2]=0;
+            claimed++;
+          }
+        }
+        return claimed;
       }
 
-      // 물리 업데이트
-      for(let i=0;i<particleCount;i++){
-        const pi=i*3;
-        let vx=velocities[pi], vy=velocities[pi+1], vz=velocities[pi+2];
-        let px=positions[pi],  py=positions[pi+1],  pz=positions[pi+2];
-
-        const ti = targetIdx[i];
-        if(ti>=0){
-          // 타깃 가진 입자: 강한 스프링, 약한 컬
+      function unclaimFarOnes(){
+        const th2 = UNCLAIM_DIST*UNCLAIM_DIST;
+        for(let i=0;i<particleCount;i++){
+          const ti = targetIdx[i]; if(ti<0) continue;
           const tp = textTargets[ti];
-          const dx = tp.x - px, dy = tp.y - py;
-          const k = assembleAll ? SPRING_ASSEMBLE : SPRING_TEXT;
-          vx += dx * (k*0.03);
-          vy += dy * (k*0.03);
-          // 약한 컬로 흔들림만
-          const curl = CURL_SCALE_LOCK*0.003;
-          vx +=  (py * curl);
-          vy += -(px * curl);
-          // z를 0 쪽으로 살짝 압착
-          vz += (0 - pz) * 0.02;
+          const dx = positions[i*3]-tp.x, dy = positions[i*3+1]-tp.y;
+          if(dx*dx+dy*dy > th2){
+            targetIdx[i]=-1; ptOwner[ti]=-1;
+            targets[i*3]=999; targets[i*3+1]=999;
+          }
+        }
+      }
+
+      // 루프 (회전 끔: 디버그에 방해)
+      function animate(){
+        requestAnimationFrame(animate);
+
+        if(mouseActive && mouseOverText()){
+          const rr = touchMode ? REVEAL_RADIUS*1.25 : REVEAL_RADIUS;
+          const pr = touchMode ? PARTICLE_CLAIM_RADIUS*1.25 : PARTICLE_CLAIM_RADIUS;
+          const batch = touchMode ? Math.round(CLAIM_BATCH*1.2) : CLAIM_BATCH;
+          const got = claimAround(mouseLocal.x, mouseLocal.y, batch, rr);
+          if(got>0) lastOnTextMs = performance.now();
         }else{
-          // 자유 입자: 컬/마우스 인력
-          const curl = CURL_SCALE_FREE*0.0032;
-          vx +=  (py * curl);
-          vy += -(px * curl);
-          if(mouseActive){
-            const dx = mouseLocal.x - px, dy = mouseLocal.y - py;
-            const d2 = dx*dx + dy*dy + 1e-4;
-            const f = (MOUSE_PULL*0.003) / d2;
-            vx += dx*f; vy += dy*f;
+          if(performance.now() - lastOnTextMs > RELEASE_DELAY && !assembleAll){
+            unclaimFarOnes();
           }
         }
 
-        // 감쇠/속도 제한
-        vx *= DAMP; vy *= DAMP; vz *= DAMP;
-        const sp = Math.hypot(vx,vy);
-        if(sp>MAX_SPD){ const s=MAX_SPD/sp; vx*=s; vy*=s; }
+        for(let i=0;i<particleCount;i++){
+          const pi=i*3;
+          let vx=velocities[pi], vy=velocities[pi+1], vz=velocities[pi+2];
+          let px=positions[pi],  py=positions[pi+1],  pz=positions[pi+2];
 
-        // 적분
-        px += vx*0.016; py += vy*0.016; pz += vz*0.016;
+          const ti = targetIdx[i];
+          if(ti>=0){
+            const tp=textTargets[ti];
+            const dx = tp.x - px, dy = tp.y - py;
+            vx += dx * (SPRING_TEXT*0.03);
+            vy += dy * (SPRING_TEXT*0.03);
+            vz += (0 - pz) * 0.02;
+          }else{
+            // 자유 입자: 마우스 인력만 약간
+            if(mouseActive){
+              const dx = mouseLocal.x - px, dy = mouseLocal.y - py;
+              const d2 = dx*dx + dy*dy + 1e-4;
+              const f = (MOUSE_PULL*0.003) / d2;
+              vx += dx*f; vy += dy*f;
+            }
+          }
 
-        // 경계 래핑
-        if(px<bounds.minX) px=bounds.maxX;
-        if(px>bounds.maxX) px=bounds.minX;
-        if(py<bounds.minY) py=bounds.maxY;
-        if(py>bounds.maxY) py=bounds.minY;
+          vx *= DAMP; vy *= DAMP; vz *= DAMP;
+          const sp = Math.hypot(vx,vy); if(sp>MAX_SPD){ const s=MAX_SPD/sp; vx*=s; vy*=s; }
 
-        velocities[pi]=vx; velocities[pi+1]=vy; velocities[pi+2]=vz;
-        positions[pi]=px;  positions[pi+1]=py;  positions[pi+2]=pz;
+          px += vx*0.016; py += vy*0.016; pz += vz*0.016;
+
+          // 약한 래핑
+          if(px<-1.2) px=1.2; if(px>1.2) px=-1.2;
+          if(py<-0.9) py=0.9;  if(py>0.9) py=-0.9;
+
+          velocities[pi]=vx; velocities[pi+1]=vy; velocities[pi+2]=vz;
+          positions[pi]=px;  positions[pi+1]=py;  positions[pi+2]=pz;
+        }
+
+        geom.attributes.position.needsUpdate = true;
+        controls.update();
+        renderer.render(scene, camera);
       }
+      animate();
 
-      geom.attributes.position.needsUpdate = true;
-      controls.update();
-      renderer.render(scene, camera);
-
-      dbg.textContent = `particles=${particleCount}  textPts=${nTargets}  assembled=${assembleAll}`;
-    }
-    animate();
-
-    log('ready');
+      log(`ready · textPts=${nTargets} · particles=${particleCount} · dot=${DOT_SIZE.toFixed(3)}`);
+    })();
   </script>
 </body>
 </html>
